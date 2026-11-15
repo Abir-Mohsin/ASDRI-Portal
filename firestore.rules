@@ -1,0 +1,976 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default Deny Everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Global Hardened Helpers
+    // =========================================================================
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedSignedIn() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isVerifiedSignedIn() && (
+        ('email' in request.auth.token && request.auth.token.email.lower() == 'abirmohsin02@gmail.com') ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidOptionalString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isValidOptionalBool(data, key) {
+      return !(key in data) || data[key] is bool;
+    }
+
+    function isValidOptionalNumber(data, key, minVal, maxVal) {
+      return !(key in data) || (data[key] is number && data[key] >= minVal && data[key] <= maxVal);
+    }
+
+    function isValidStringList(listVal, maxLen) {
+      return listVal is list &&
+        listVal.size() <= maxLen &&
+        (listVal.size() == 0 || (listVal[0] is string && listVal[0].size() <= 150));
+    }
+
+    function isValidMapList(listVal, maxLen) {
+      return listVal is list &&
+        listVal.size() <= maxLen &&
+        (listVal.size() == 0 || listVal[0] is map);
+    }
+
+    function isRole(val) {
+      return val in [
+        'super_admin',
+        'director',
+        'deputy_director',
+        'assistant_director',
+        'admin_incharge',
+        'coordinator',
+        'dept_head',
+        'teacher',
+        'staff'
+      ];
+    }
+
+    function isEmployeeOwner(employeeId) {
+      return exists(/databases/$(database)/documents/employees/$(employeeId)) &&
+        ('authUid' in get(/databases/$(database)/documents/employees/$(employeeId)).data) &&
+        get(/databases/$(database)/documents/employees/$(employeeId)).data.authUid == request.auth.uid;
+    }
+
+    // =========================================================================
+    // Entity Validation Blueprints
+    // =========================================================================
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        isValidString(data.email, 3, 200) &&
+        data.role in ['super_admin', 'director', 'deputy_director', 'assistant_director', 'admin_incharge'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserAccount(data) {
+      return data.keys().hasAll(['uid', 'employeeId', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'employeeId', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        isValidId(data.employeeId) &&
+        isValidString(data.displayName, 1, 150) &&
+        isRole(data.role) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data) {
+      return data.keys().hasAll(['email', 'updatedAt']) &&
+        data.keys().hasOnly(['email', 'phone', 'updatedAt']) &&
+        isValidString(data.email, 3, 200) &&
+        isValidOptionalString(data, 'phone', 40) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEmployeeProfile(data) {
+      return data.keys().hasAll(['id', 'name', 'designation', 'department', 'status', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'nameBn', 'photoUrl', 'designation', 'designationBn',
+          'department', 'employmentType', 'joiningDate', 'reportingToId',
+          'reportingToName', 'status', 'attendanceMachineId', 'shiftSchedule',
+          'leavePolicy', 'role', 'authUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.name, 1, 150) &&
+        isValidOptionalString(data, 'nameBn', 150) &&
+        isValidOptionalString(data, 'photoUrl', 500) &&
+        isValidString(data.designation, 1, 120) &&
+        isValidOptionalString(data, 'designationBn', 120) &&
+        isValidString(data.department, 1, 120) &&
+        isValidOptionalString(data, 'employmentType', 80) &&
+        isValidOptionalString(data, 'joiningDate', 32) &&
+        isValidOptionalString(data, 'reportingToId', 64) &&
+        isValidOptionalString(data, 'reportingToName', 150) &&
+        data.status in ['Active', 'Inactive', 'Resigned'] &&
+        isValidOptionalString(data, 'attendanceMachineId', 64) &&
+        isValidOptionalString(data, 'shiftSchedule', 64) &&
+        isValidOptionalString(data, 'leavePolicy', 120) &&
+        isRole(data.role) &&
+        isValidOptionalString(data, 'authUid', 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEmployeePrivateInfo(data) {
+      return data.keys().hasAll(['email', 'phone', 'updatedAt']) &&
+        data.keys().hasOnly(['email', 'phone', 'nidOrPassport', 'bloodGroup', 'updatedAt']) &&
+        isValidString(data.email, 3, 200) &&
+        isValidString(data.phone, 1, 40) &&
+        isValidOptionalString(data, 'nidOrPassport', 80) &&
+        isValidOptionalString(data, 'bloodGroup', 16) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEmailBinding(data) {
+      return data.keys().hasAll(['hashId', 'employeeId', 'displayName', 'role', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['hashId', 'employeeId', 'displayName', 'role', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.hashId) &&
+        isValidId(data.employeeId) &&
+        isValidString(data.displayName, 1, 150) &&
+        isRole(data.role) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAttendanceRecord(data) {
+      return data.keys().hasAll([
+          'id', 'employeeId', 'employeeName', 'date', 'status',
+          'totalWorkingDurationMinutes', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'employeeId', 'employeeName', 'department', 'date',
+          'firstInTime', 'lastOutTime', 'isCurrentlyIn', 'isMissingPunch',
+          'sessions', 'totalWorkingDurationMinutes', 'breakDurationMinutes',
+          'lateDurationMinutes', 'earlyLeaveMinutes', 'status', 'leaveType',
+          'deviceId', 'verificationStatus', 'remarks', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.employeeId) &&
+        isValidString(data.employeeName, 1, 150) &&
+        isValidOptionalString(data, 'department', 120) &&
+        data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        isValidOptionalString(data, 'firstInTime', 16) &&
+        isValidOptionalString(data, 'lastOutTime', 16) &&
+        isValidOptionalBool(data, 'isCurrentlyIn') &&
+        isValidOptionalBool(data, 'isMissingPunch') &&
+        (!('sessions' in data) || isValidMapList(data.sessions, 20)) &&
+        data.totalWorkingDurationMinutes is number && data.totalWorkingDurationMinutes >= 0 && data.totalWorkingDurationMinutes <= 1440 &&
+        isValidOptionalNumber(data, 'breakDurationMinutes', 0, 480) &&
+        isValidOptionalNumber(data, 'lateDurationMinutes', 0, 1440) &&
+        isValidOptionalNumber(data, 'earlyLeaveMinutes', 0, 1440) &&
+        data.status in ['Present', 'Late', 'Absent', 'Leave', 'Half Day', 'Missing Punch'] &&
+        isValidOptionalString(data, 'leaveType', 80) &&
+        isValidOptionalString(data, 'deviceId', 128) &&
+        isValidOptionalString(data, 'verificationStatus', 64) &&
+        isValidOptionalString(data, 'remarks', 500) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidRawPunch(data) {
+      return data.keys().hasAll([
+          'id', 'employeeId', 'punchDate', 'punchTime', 'punchType',
+          'syncStatus', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'machineId', 'employeeId', 'attendanceMachineId', 'timestamp',
+          'punchDate', 'punchTime', 'punchType', 'verificationType', 'deviceId',
+          'syncStatus', 'lat', 'lng', 'distanceMeters', 'qrTokenUsed',
+          'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidOptionalString(data, 'machineId', 64) &&
+        isValidId(data.employeeId) &&
+        isValidOptionalString(data, 'attendanceMachineId', 64) &&
+        isValidOptionalString(data, 'timestamp', 64) &&
+        isValidString(data.punchDate, 8, 16) &&
+        isValidString(data.punchTime, 4, 16) &&
+        data.punchType in ['IN', 'OUT', 'UNKNOWN'] &&
+        isValidOptionalString(data, 'verificationType', 64) &&
+        isValidOptionalString(data, 'deviceId', 128) &&
+        data.syncStatus in ['synced', 'pending', 'duplicate_skipped'] &&
+        isValidOptionalNumber(data, 'lat', -90, 90) &&
+        isValidOptionalNumber(data, 'lng', -180, 180) &&
+        isValidOptionalNumber(data, 'distanceMeters', 0, 1000000) &&
+        isValidOptionalString(data, 'qrTokenUsed', 64) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCorrection(data) {
+      return data.keys().hasAll([
+          'id', 'employeeId', 'employeeName', 'date', 'requestedType',
+          'reason', 'status', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'employeeId', 'employeeName', 'department', 'date',
+          'requestedType', 'correctedInTime', 'correctedOutTime',
+          'beforeInTime', 'beforeOutTime', 'beforeStatus', 'reason',
+          'status', 'approverId', 'approverName', 'approvalRemarks',
+          'appliedAt', 'reviewedAt', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.employeeId) &&
+        isValidString(data.employeeName, 1, 150) &&
+        isValidOptionalString(data, 'department', 120) &&
+        isValidString(data.date, 8, 16) &&
+        data.requestedType in ['IN', 'OUT', 'BOTH'] &&
+        isValidOptionalString(data, 'correctedInTime', 16) &&
+        isValidOptionalString(data, 'correctedOutTime', 16) &&
+        isValidOptionalString(data, 'beforeInTime', 16) &&
+        isValidOptionalString(data, 'beforeOutTime', 16) &&
+        isValidOptionalString(data, 'beforeStatus', 64) &&
+        isValidString(data.reason, 1, 1000) &&
+        data.status in ['Pending', 'Approved', 'Rejected'] &&
+        isValidOptionalString(data, 'approverId', 64) &&
+        isValidOptionalString(data, 'approverName', 150) &&
+        isValidOptionalString(data, 'approvalRemarks', 500) &&
+        isValidOptionalString(data, 'appliedAt', 64) &&
+        isValidOptionalString(data, 'reviewedAt', 64) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLeaveBalance(data) {
+      return data.keys().hasAll([
+          'employeeId', 'year', 'casualLeaveTotal', 'casualLeaveUsed',
+          'sickLeaveTotal', 'sickLeaveUsed', 'earnedLeaveTotal',
+          'earnedLeaveUsed', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'employeeId', 'year', 'casualLeaveTotal', 'casualLeaveUsed',
+          'sickLeaveTotal', 'sickLeaveUsed', 'earnedLeaveTotal',
+          'earnedLeaveUsed', 'dutyLeaveUsed', 'isCustomQuota',
+          'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.employeeId) &&
+        data.year is number && data.year >= 2020 && data.year <= 2100 &&
+        data.casualLeaveTotal is number && data.casualLeaveTotal >= 0 && data.casualLeaveTotal <= 365 &&
+        data.casualLeaveUsed is number && data.casualLeaveUsed >= 0 && data.casualLeaveUsed <= 365 &&
+        data.sickLeaveTotal is number && data.sickLeaveTotal >= 0 && data.sickLeaveTotal <= 365 &&
+        data.sickLeaveUsed is number && data.sickLeaveUsed >= 0 && data.sickLeaveUsed <= 365 &&
+        data.earnedLeaveTotal is number && data.earnedLeaveTotal >= 0 && data.earnedLeaveTotal <= 365 &&
+        data.earnedLeaveUsed is number && data.earnedLeaveUsed >= 0 && data.earnedLeaveUsed <= 365 &&
+        isValidOptionalNumber(data, 'dutyLeaveUsed', 0, 365) &&
+        isValidOptionalBool(data, 'isCustomQuota') &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLeaveApplication(data) {
+      return data.keys().hasAll([
+          'id', 'employeeId', 'employeeName', 'leaveType', 'startDate',
+          'endDate', 'totalDays', 'reason', 'status', 'ownerUid',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'employeeId', 'employeeName', 'department', 'leaveType',
+          'startDate', 'endDate', 'totalDays', 'reason', 'contactDuringLeave',
+          'attachmentName', 'status', 'deptHeadRecommendation', 'deptHeadRemarks',
+          'deptHeadReviewerId', 'directorRemarks', 'directorReviewerId',
+          'appliedDate', 'reviewedDate', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.employeeId) &&
+        isValidString(data.employeeName, 1, 150) &&
+        isValidOptionalString(data, 'department', 120) &&
+        isValidString(data.leaveType, 1, 80) &&
+        isValidString(data.startDate, 8, 16) &&
+        isValidString(data.endDate, 8, 16) &&
+        data.totalDays is number && data.totalDays >= 1 && data.totalDays <= 365 &&
+        isValidString(data.reason, 1, 1000) &&
+        isValidOptionalString(data, 'contactDuringLeave', 80) &&
+        isValidOptionalString(data, 'attachmentName', 200) &&
+        data.status in ['Pending_Dept_Head', 'Pending_Director', 'Approved', 'Rejected', 'Cancelled'] &&
+        isValidOptionalString(data, 'deptHeadRecommendation', 40) &&
+        isValidOptionalString(data, 'deptHeadRemarks', 500) &&
+        isValidOptionalString(data, 'deptHeadReviewerId', 64) &&
+        isValidOptionalString(data, 'directorRemarks', 500) &&
+        isValidOptionalString(data, 'directorReviewerId', 64) &&
+        isValidOptionalString(data, 'appliedDate', 32) &&
+        isValidOptionalString(data, 'reviewedDate', 32) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidActionTrackerItem(data) {
+      return data.keys().hasAll([
+          'id', 'serialNo', 'title', 'status', 'progressPercentage',
+          'deadline', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'serialNo', 'title', 'description', 'assignedPersonText',
+          'assignedEmployeeIds', 'assigneeUids', 'priority', 'startDate',
+          'deadline', 'status', 'progressPercentage', 'latestUpdate',
+          'submissionReport', 'submissionFiles', 'submittedAt', 'submittedBy',
+          'nextAction', 'followupDate', 'completionDate', 'meetingTitle',
+          'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.serialNo is number && data.serialNo >= 0 && data.serialNo <= 100000 &&
+        isValidString(data.title, 1, 300) &&
+        isValidOptionalString(data, 'description', 3000) &&
+        isValidOptionalString(data, 'assignedPersonText', 300) &&
+        (!('assignedEmployeeIds' in data) || isValidStringList(data.assignedEmployeeIds, 50)) &&
+        (!('assigneeUids' in data) || isValidStringList(data.assigneeUids, 50)) &&
+        isValidOptionalString(data, 'priority', 32) &&
+        isValidOptionalString(data, 'startDate', 32) &&
+        isValidString(data.deadline, 4, 32) &&
+        isValidString(data.status, 1, 32) &&
+        data.progressPercentage is number && data.progressPercentage >= 0 && data.progressPercentage <= 100 &&
+        isValidOptionalString(data, 'latestUpdate', 1000) &&
+        isValidOptionalString(data, 'submissionReport', 3000) &&
+        (!('submissionFiles' in data) || isValidMapList(data.submissionFiles, 25)) &&
+        isValidOptionalString(data, 'submittedAt', 32) &&
+        isValidOptionalString(data, 'submittedBy', 150) &&
+        isValidOptionalString(data, 'nextAction', 500) &&
+        isValidOptionalString(data, 'followupDate', 32) &&
+        isValidOptionalString(data, 'completionDate', 32) &&
+        isValidOptionalString(data, 'meetingTitle', 200) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMeeting(data) {
+      return data.keys().hasAll([
+          'id', 'title', 'date', 'approvalStatus', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'title', 'meetingType', 'date', 'startTime', 'endTime',
+          'venue', 'chairperson', 'secretary', 'department', 'participants',
+          'participantUids', 'invitedEmployeeIds', 'actualAttendeeIds',
+          'agenda', 'meetingNotes', 'finalDecisions',
+          'approvalStatus', 'meetingStatus', 'calendarEventId',
+          'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.title, 1, 300) &&
+        isValidOptionalString(data, 'meetingType', 120) &&
+        isValidString(data.date, 4, 32) &&
+        isValidOptionalString(data, 'startTime', 16) &&
+        isValidOptionalString(data, 'endTime', 16) &&
+        isValidOptionalString(data, 'venue', 200) &&
+        isValidOptionalString(data, 'chairperson', 150) &&
+        isValidOptionalString(data, 'secretary', 150) &&
+        isValidOptionalString(data, 'department', 120) &&
+        (!('participants' in data) || isValidStringList(data.participants, 80)) &&
+        (!('participantUids' in data) || isValidStringList(data.participantUids, 80)) &&
+        (!('invitedEmployeeIds' in data) || isValidStringList(data.invitedEmployeeIds, 80)) &&
+        (!('actualAttendeeIds' in data) || isValidStringList(data.actualAttendeeIds, 80)) &&
+        (!('agenda' in data) || isValidStringList(data.agenda, 50)) &&
+        isValidOptionalString(data, 'meetingNotes', 5000) &&
+        (!('finalDecisions' in data) || isValidMapList(data.finalDecisions, 50)) &&
+        data.approvalStatus in ['Draft', 'Published_Official', 'Archived'] &&
+        (!('meetingStatus' in data) || data.meetingStatus in ['Scheduled', 'Minutes_Added']) &&
+        isValidOptionalString(data, 'calendarEventId', 128) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll([
+          'id', 'title', 'assignedPersonId', 'status', 'progressPercentage',
+          'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'title', 'description', 'category', 'department',
+          'assignedPersonId', 'assignedPersonName', 'assigneeUid',
+          'supervisorId', 'supervisorName', 'startDate', 'deadline',
+          'priority', 'status', 'progressPercentage', 'relatedMeetingId',
+          'relatedDecisionId', 'submissionNotes', 'submissionAttachment',
+          'submissionFiles', 'revisionFeedback', 'completedAt',
+          'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.title, 1, 300) &&
+        isValidOptionalString(data, 'description', 3000) &&
+        isValidOptionalString(data, 'category', 120) &&
+        isValidOptionalString(data, 'department', 120) &&
+        isValidId(data.assignedPersonId) &&
+        isValidOptionalString(data, 'assignedPersonName', 150) &&
+        isValidOptionalString(data, 'assigneeUid', 128) &&
+        isValidOptionalString(data, 'supervisorId', 64) &&
+        isValidOptionalString(data, 'supervisorName', 150) &&
+        isValidOptionalString(data, 'startDate', 32) &&
+        isValidOptionalString(data, 'deadline', 32) &&
+        isValidOptionalString(data, 'priority', 32) &&
+        isValidString(data.status, 1, 48) &&
+        data.progressPercentage is number && data.progressPercentage >= 0 && data.progressPercentage <= 100 &&
+        isValidOptionalString(data, 'relatedMeetingId', 128) &&
+        isValidOptionalString(data, 'relatedDecisionId', 128) &&
+        isValidOptionalString(data, 'submissionNotes', 3000) &&
+        isValidOptionalString(data, 'submissionAttachment', 1000) &&
+        (!('submissionFiles' in data) || isValidMapList(data.submissionFiles, 25)) &&
+        isValidOptionalString(data, 'revisionFeedback', 1000) &&
+        isValidOptionalString(data, 'completedAt', 64) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCalendarEvent(data) {
+      return data.keys().hasAll([
+          'id', 'title', 'category', 'startDate', 'endDate',
+          'isPublicCalendar', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'title', 'description', 'category', 'startDate', 'endDate',
+          'timeLabel', 'location', 'department', 'linkedMeetingId', 'createdBy',
+          'isPublicCalendar', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.title, 1, 200) &&
+        isValidOptionalString(data, 'description', 1500) &&
+        data.category in ['Holiday', 'Academic', 'Exam', 'Event', 'Special_Working_Day', 'Meeting'] &&
+        data.startDate is string && data.startDate.size() == 10 && data.startDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.endDate is string && data.endDate.size() == 10 && data.endDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        isValidOptionalString(data, 'timeLabel', 80) &&
+        isValidOptionalString(data, 'location', 200) &&
+        isValidOptionalString(data, 'department', 120) &&
+        isValidOptionalString(data, 'linkedMeetingId', 128) &&
+        isValidOptionalString(data, 'createdBy', 150) &&
+        data.isPublicCalendar == true &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll([
+          'id', 'recipientEmployeeId', 'recipientUid', 'senderUid',
+          'title', 'message', 'linkType', 'isRead', 'priority',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'recipientEmployeeId', 'recipientName', 'recipientUid',
+          'senderEmployeeId', 'senderName', 'senderUid', 'title', 'message',
+          'linkType', 'linkId', 'actionTrackerId', 'relatedTaskId',
+          'isRead', 'priority', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.recipientEmployeeId, 1, 64) &&
+        isValidOptionalString(data, 'recipientName', 150) &&
+        isValidString(data.recipientUid, 1, 128) &&
+        isValidOptionalString(data, 'senderEmployeeId', 64) &&
+        isValidOptionalString(data, 'senderName', 150) &&
+        isValidId(data.senderUid) &&
+        isValidString(data.title, 1, 250) &&
+        isValidString(data.message, 1, 1500) &&
+        data.linkType in ['task', 'meeting', 'leave', 'tracker', 'notice'] &&
+        isValidOptionalString(data, 'linkId', 128) &&
+        isValidOptionalString(data, 'actionTrackerId', 128) &&
+        isValidOptionalString(data, 'relatedTaskId', 128) &&
+        data.isRead is bool &&
+        data.priority in ['normal', 'urgent'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll([
+          'id', 'actorId', 'actorUid', 'action', 'module', 'details', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'timestamp', 'actorId', 'actorUid', 'actorName', 'actorRole',
+          'action', 'module', 'details', 'beforeValue', 'afterValue',
+          'reason', 'targetEmployeeId', 'targetDate', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidOptionalString(data, 'timestamp', 64) &&
+        isValidString(data.actorId, 1, 64) &&
+        isValidId(data.actorUid) &&
+        isValidOptionalString(data, 'actorName', 150) &&
+        isValidOptionalString(data, 'actorRole', 64) &&
+        isValidString(data.action, 1, 100) &&
+        data.module in ['Attendance', 'Leave', 'Task', 'Meeting', 'Employee', 'Document', 'System'] &&
+        isValidString(data.details, 1, 1500) &&
+        isValidOptionalString(data, 'beforeValue', 500) &&
+        isValidOptionalString(data, 'afterValue', 500) &&
+        isValidOptionalString(data, 'reason', 500) &&
+        isValidOptionalString(data, 'targetEmployeeId', 64) &&
+        isValidOptionalString(data, 'targetDate', 32) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSettingDoc(data, settingId) {
+      return data.keys().hasAll(['settingType', 'updatedByUid', 'updatedAt']) &&
+        data.settingType == settingId &&
+        isValidId(data.updatedByUid) &&
+        data.updatedAt is timestamp && (
+          (settingId == 'attendancePolicy' &&
+            data.keys().hasOnly([
+              'settingType', 'officeStartTime', 'officeEndTime', 'gracePeriodMinutes',
+              'lateThresholdMinutes', 'earlyLeaveThresholdMinutes', 'breakDurationMinutes',
+              'weeklyHolidays', 'specialDays', 'campusLat', 'campusLng',
+              'geofenceRadiusMeters', 'qrRotationSeconds', 'requireGpsVerification',
+              'autoSyncIntervalMinutes', 'institutionLogoUrl', 'updatedByUid', 'updatedAt'
+            ]) &&
+            isValidOptionalString(data, 'officeStartTime', 16) &&
+            isValidOptionalString(data, 'officeEndTime', 16) &&
+            isValidOptionalNumber(data, 'gracePeriodMinutes', 0, 240) &&
+            isValidOptionalNumber(data, 'lateThresholdMinutes', 0, 240) &&
+            isValidOptionalNumber(data, 'earlyLeaveThresholdMinutes', 0, 240) &&
+            isValidOptionalNumber(data, 'breakDurationMinutes', 0, 240) &&
+            (!('weeklyHolidays' in data) || isValidStringList(data.weeklyHolidays, 10)) &&
+            (!('specialDays' in data) || isValidMapList(data.specialDays, 120)) &&
+            isValidOptionalNumber(data, 'campusLat', -90, 90) &&
+            isValidOptionalNumber(data, 'campusLng', -180, 180) &&
+            isValidOptionalNumber(data, 'geofenceRadiusMeters', 10, 50000) &&
+            isValidOptionalNumber(data, 'qrRotationSeconds', 5, 3600) &&
+            isValidOptionalBool(data, 'requireGpsVerification') &&
+            isValidOptionalNumber(data, 'autoSyncIntervalMinutes', 1, 1440) &&
+            isValidOptionalString(data, 'institutionLogoUrl', 150000)
+          ) ||
+          (settingId == 'institutionalLeavePolicy' &&
+            data.keys().hasOnly([
+              'settingType', 'year', 'academicYearLabel', 'casualLeaveEnabled',
+              'casualLeaveDefault', 'sickLeaveEnabled', 'sickLeaveDefault',
+              'earnedLeaveEnabled', 'earnedLeaveDefault', 'dutyLeaveEnabled',
+              'hijriOffsetDays', 'updatedBy', 'updatedByUid', 'updatedAt'
+            ]) &&
+            isValidOptionalNumber(data, 'year', 2020, 2100) &&
+            isValidOptionalString(data, 'academicYearLabel', 100) &&
+            isValidOptionalBool(data, 'casualLeaveEnabled') &&
+            isValidOptionalNumber(data, 'casualLeaveDefault', 0, 365) &&
+            isValidOptionalBool(data, 'sickLeaveEnabled') &&
+            isValidOptionalNumber(data, 'sickLeaveDefault', 0, 365) &&
+            isValidOptionalBool(data, 'earnedLeaveEnabled') &&
+            isValidOptionalNumber(data, 'earnedLeaveDefault', 0, 365) &&
+            isValidOptionalBool(data, 'dutyLeaveEnabled') &&
+            isValidOptionalNumber(data, 'hijriOffsetDays', -1, 1) &&
+            isValidOptionalString(data, 'updatedBy', 150)
+          )
+        );
+    }
+
+    // =========================================================================
+    // Collection Match Blocks
+    // =========================================================================
+
+    match /admins/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(userId) && isValidAdminUser(incoming()) &&
+        incoming().uid == userId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(userId) && isValidAdminUser(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isVerifiedSignedIn() && isValidId(userId) && isValidUserAccount(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        userId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || incoming().role in ['coordinator', 'dept_head', 'teacher', 'staff']);
+      allow update: if isVerifiedSignedIn() && isValidId(userId) && isValidUserAccount(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isOwner(userId) &&
+            incoming().role == existing().role &&
+            incoming().employeeId == existing().employeeId &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']))
+        );
+      allow delete: if isAdmin() && isValidId(userId);
+
+      match /private/{docId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
+        allow list: if isAdmin() || isOwner(userId);
+        allow create: if isVerifiedSignedIn() && isValidId(userId) && isValidId(docId) &&
+          isValidUserPrivateInfo(incoming()) &&
+          incoming().updatedAt == request.time &&
+          (isOwner(userId) || isAdmin());
+        allow update: if isVerifiedSignedIn() && isValidId(userId) && isValidId(docId) &&
+          isValidUserPrivateInfo(incoming()) &&
+          incoming().updatedAt == request.time &&
+          (isOwner(userId) || isAdmin()) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['email', 'phone', 'updatedAt']);
+        allow delete: if isAdmin() && isValidId(userId) && isValidId(docId);
+      }
+    }
+
+    match /employees/{employeeId} {
+      allow get: if isValidId(employeeId) && (isAdmin() || (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid);
+      allow create: if isAdmin() && isValidId(employeeId) && isValidEmployeeProfile(incoming()) &&
+        incoming().id == employeeId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedSignedIn() && isValidId(employeeId) && isValidEmployeeProfile(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (('authUid' in existing()) && existing().authUid == request.auth.uid &&
+            incoming().role == existing().role &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['photoUrl', 'nameBn', 'updatedAt']))
+        );
+      allow delete: if isAdmin() && isValidId(employeeId);
+
+      match /private/{docId} {
+        allow get: if isValidId(employeeId) && isValidId(docId) && (isAdmin() || (isSignedIn() && isEmployeeOwner(employeeId)));
+        allow list: if isAdmin() || (isSignedIn() && isEmployeeOwner(employeeId));
+        allow create: if isVerifiedSignedIn() && isValidId(employeeId) && isValidId(docId) &&
+          isValidEmployeePrivateInfo(incoming()) &&
+          incoming().updatedAt == request.time &&
+          (isAdmin() || isEmployeeOwner(employeeId));
+        allow update: if isVerifiedSignedIn() && isValidId(employeeId) && isValidId(docId) &&
+          isValidEmployeePrivateInfo(incoming()) &&
+          incoming().updatedAt == request.time &&
+          (isAdmin() || isEmployeeOwner(employeeId)) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['email', 'phone', 'nidOrPassport', 'bloodGroup', 'updatedAt']);
+        allow delete: if isAdmin() && isValidId(employeeId) && isValidId(docId);
+      }
+    }
+
+    match /emailBindings/{hashId} {
+      allow get: if isVerifiedSignedIn() && isValidId(hashId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(hashId) && isValidEmailBinding(incoming()) &&
+        incoming().hashId == hashId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(hashId) && isValidEmailBinding(incoming()) &&
+        incoming().hashId == existing().hashId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['employeeId', 'displayName', 'role', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(hashId);
+    }
+
+    match /attendanceRecords/{recordId} {
+      allow get: if isValidId(recordId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isVerifiedSignedIn() && isValidId(recordId) && isValidAttendanceRecord(incoming()) &&
+        incoming().id == recordId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || incoming().ownerUid == request.auth.uid);
+      allow update: if isVerifiedSignedIn() && isValidId(recordId) && isValidAttendanceRecord(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (existing().ownerUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'firstInTime', 'lastOutTime', 'sessions', 'totalWorkingDurationMinutes',
+              'lateDurationMinutes', 'earlyLeaveMinutes', 'status', 'isCurrentlyIn',
+              'isMissingPunch', 'deviceId', 'verificationStatus', 'remarks', 'updatedAt'
+            ]))
+        );
+      allow delete: if isAdmin() && isValidId(recordId);
+    }
+
+    match /rawPunches/{punchId} {
+      allow get: if isValidId(punchId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isVerifiedSignedIn() && isValidId(punchId) && isValidRawPunch(incoming()) &&
+        incoming().id == punchId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || incoming().ownerUid == request.auth.uid);
+      allow update: if isAdmin() && isValidId(punchId) && isValidRawPunch(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['syncStatus', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(punchId);
+    }
+
+    match /corrections/{correctionId} {
+      allow get: if isValidId(correctionId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isVerifiedSignedIn() && isValidId(correctionId) && isValidCorrection(incoming()) &&
+        incoming().id == correctionId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || (incoming().ownerUid == request.auth.uid && incoming().status == 'Pending'));
+      allow update: if isAdmin() && isValidId(correctionId) && isValidCorrection(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'approverId', 'approverName', 'approvalRemarks',
+          'correctedInTime', 'correctedOutTime', 'reason',
+          'beforeInTime', 'beforeOutTime', 'beforeStatus', 'reviewedAt', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(correctionId);
+    }
+
+    match /leaveBalances/{balanceId} {
+      allow get: if isValidId(balanceId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isAdmin() && isValidId(balanceId) && isValidLeaveBalance(incoming()) &&
+        incoming().employeeId == balanceId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(balanceId) && isValidLeaveBalance(incoming()) &&
+        incoming().employeeId == existing().employeeId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'year', 'casualLeaveTotal', 'casualLeaveUsed', 'sickLeaveTotal',
+          'sickLeaveUsed', 'earnedLeaveTotal', 'earnedLeaveUsed',
+          'dutyLeaveUsed', 'isCustomQuota', 'ownerUid', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(balanceId);
+    }
+
+    match /leaveApplications/{leaveId} {
+      allow get: if isValidId(leaveId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isVerifiedSignedIn() && isValidId(leaveId) && isValidLeaveApplication(incoming()) &&
+        incoming().id == leaveId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || (incoming().ownerUid == request.auth.uid && incoming().status == 'Pending_Dept_Head'));
+      allow update: if isVerifiedSignedIn() && isValidId(leaveId) && isValidLeaveApplication(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'deptHeadRecommendation', 'deptHeadRemarks',
+            'deptHeadReviewerId', 'directorRemarks', 'directorReviewerId',
+            'reviewedDate', 'updatedAt'
+          ])) ||
+          (existing().ownerUid == request.auth.uid &&
+            existing().status == 'Pending_Dept_Head' &&
+            incoming().status == 'Cancelled' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        );
+      allow delete: if isAdmin() && isValidId(leaveId);
+    }
+
+    match /actionTrackerItems/{itemId} {
+      allow get: if isValidId(itemId) && (
+        isAdmin() ||
+        (isSignedIn() && (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assigneeUids))
+      );
+      allow list: if isAdmin() || (
+        isSignedIn() && (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assigneeUids)
+      );
+      allow create: if isAdmin() && isValidId(itemId) && isValidActionTrackerItem(incoming()) &&
+        incoming().id == itemId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedSignedIn() && isValidId(itemId) && isValidActionTrackerItem(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'serialNo', 'title', 'description', 'assignedPersonText', 'assignedEmployeeIds',
+            'assigneeUids', 'priority', 'startDate', 'deadline', 'status',
+            'progressPercentage', 'latestUpdate', 'submissionReport',
+            'submissionFiles', 'submittedAt', 'submittedBy', 'nextAction',
+            'followupDate', 'completionDate', 'meetingTitle', 'updatedAt'
+          ])) ||
+          ((existing().ownerUid == request.auth.uid || request.auth.uid in existing().assigneeUids) &&
+            existing().status != 'সম্পন্ন' &&
+            existing().status != 'Completed' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'progressPercentage', 'latestUpdate', 'submissionReport',
+              'submissionFiles', 'submittedAt', 'submittedBy', 'nextAction',
+              'completionDate', 'updatedAt'
+            ]))
+        );
+      allow delete: if isAdmin() && isValidId(itemId);
+    }
+
+    match /meetings/{meetingId} {
+      allow get: if isValidId(meetingId) && (isAdmin() || (isSignedIn() && request.auth.uid in resource.data.participantUids));
+      allow list: if isAdmin() || (isSignedIn() && request.auth.uid in resource.data.participantUids);
+      allow create: if isAdmin() && isValidId(meetingId) && isValidMeeting(incoming()) &&
+        incoming().id == meetingId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(meetingId) && isValidMeeting(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'meetingType', 'date', 'startTime', 'endTime', 'venue',
+          'chairperson', 'secretary', 'department', 'participants',
+          'participantUids', 'invitedEmployeeIds', 'actualAttendeeIds',
+          'agenda', 'meetingNotes', 'finalDecisions',
+          'approvalStatus', 'meetingStatus', 'calendarEventId', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(meetingId);
+    }
+
+    match /tasks/{taskId} {
+      allow get: if isValidId(taskId) && (
+        isAdmin() ||
+        (isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid))
+      );
+      allow list: if isAdmin() || (
+        isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid)
+      );
+      allow create: if isAdmin() && isValidId(taskId) && isValidTask(incoming()) &&
+        incoming().id == taskId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedSignedIn() && isValidId(taskId) && isValidTask(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'description', 'category', 'department', 'assignedPersonId',
+            'assignedPersonName', 'assigneeUid', 'supervisorId', 'supervisorName',
+            'startDate', 'deadline', 'priority', 'status', 'progressPercentage',
+            'relatedMeetingId', 'relatedDecisionId',
+            'submissionNotes', 'submissionAttachment', 'submissionFiles',
+            'revisionFeedback', 'completedAt', 'updatedAt'
+          ])) ||
+          ((existing().ownerUid == request.auth.uid || existing().assigneeUid == request.auth.uid) &&
+            existing().status != 'Approved' &&
+            existing().status != 'Cancelled' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'progressPercentage', 'submissionNotes',
+              'submissionAttachment', 'submissionFiles', 'updatedAt'
+            ]))
+        );
+      allow delete: if isAdmin() && isValidId(taskId);
+    }
+
+    match /calendarEvents/{eventId} {
+      allow get: if isValidId(eventId) && (isAdmin() || (isSignedIn() && resource.data.isPublicCalendar == true));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.isPublicCalendar == true);
+      allow create: if isAdmin() && isValidId(eventId) && isValidCalendarEvent(incoming()) &&
+        incoming().id == eventId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(eventId) && isValidCalendarEvent(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'description', 'category', 'startDate', 'endDate',
+          'timeLabel', 'location', 'department', 'linkedMeetingId', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(eventId);
+    }
+
+    match /notifications/{notifId} {
+      allow get: if isValidId(notifId) && (isAdmin() || (isSignedIn() && resource.data.recipientUid == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.recipientUid == request.auth.uid);
+      allow create: if isVerifiedSignedIn() && isValidId(notifId) && isValidNotification(incoming()) &&
+        incoming().id == notifId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || (incoming().senderUid == request.auth.uid && incoming().isRead == false));
+      allow update: if isVerifiedSignedIn() && isValidId(notifId) && isValidNotification(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().recipientUid == existing().recipientUid &&
+        incoming().senderUid == existing().senderUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (existing().recipientUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'updatedAt']))
+        );
+      allow delete: if isAdmin() && isValidId(notifId);
+    }
+
+    match /auditLogs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isVerifiedSignedIn() && isValidId(logId) && isValidAuditLog(incoming()) &&
+        incoming().id == logId &&
+        incoming().createdAt == request.time &&
+        (isAdmin() || incoming().actorUid == request.auth.uid);
+      allow update, delete: if false;
+    }
+
+    match /settings/{settingId} {
+      allow get: if isSignedIn() && settingId in ['attendancePolicy', 'institutionalLeavePolicy'];
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(settingId) &&
+        settingId in ['attendancePolicy', 'institutionalLeavePolicy'] &&
+        isValidSettingDoc(incoming(), settingId) &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(settingId) &&
+        settingId in ['attendancePolicy', 'institutionalLeavePolicy'] &&
+        isValidSettingDoc(incoming(), settingId) &&
+        incoming().settingType == existing().settingType &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'officeStartTime', 'officeEndTime', 'gracePeriodMinutes',
+          'lateThresholdMinutes', 'earlyLeaveThresholdMinutes', 'breakDurationMinutes',
+          'weeklyHolidays', 'specialDays', 'campusLat', 'campusLng',
+          'geofenceRadiusMeters', 'qrRotationSeconds', 'requireGpsVerification',
+          'autoSyncIntervalMinutes', 'institutionLogoUrl', 'year', 'academicYearLabel', 'casualLeaveEnabled',
+          'casualLeaveDefault', 'sickLeaveEnabled', 'sickLeaveDefault',
+          'earnedLeaveEnabled', 'earnedLeaveDefault', 'dutyLeaveEnabled',
+          'hijriOffsetDays', 'updatedBy', 'updatedByUid', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+  }
+}

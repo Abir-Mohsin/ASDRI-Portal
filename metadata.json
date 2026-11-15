@@ -1,0 +1,6 @@
+{
+  "name": "ASDRI Institutional Management System",
+  "description": "Comprehensive Institutional Management System (IIMS) for ASDRI featuring Biometric Attendance, Leave Approval, Digital Meeting Minutes, Task Management, Staff Workspaces, and Automated Monthly Reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

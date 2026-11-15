@@ -1,0 +1,457 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Trusted institutional administrator privilege document keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["super_admin", "director", "deputy_director", "assistant_director", "admin_incharge"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt", "updatedAt"]
+    },
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Non-PII operational mapping between a Firebase Auth UID and an ASDRI employee profile.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "role": { "type": "string", "enum": ["super_admin", "director", "deputy_director", "assistant_director", "admin_incharge", "coordinator", "dept_head", "teacher", "staff"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "employeeId", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII sub-document for an authenticated user account.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "updatedAt"]
+    },
+    "EmployeeProfile": {
+      "title": "EmployeeProfile",
+      "description": "Non-PII institutional staff/teacher profile.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "nameBn": { "type": "string", "maxLength": 150 },
+        "photoUrl": { "type": "string", "maxLength": 500 },
+        "designation": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "designationBn": { "type": "string", "maxLength": 120 },
+        "department": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "employmentType": { "type": "string", "maxLength": 80 },
+        "joiningDate": { "type": "string", "maxLength": 32 },
+        "reportingToId": { "type": "string", "maxLength": 64 },
+        "reportingToName": { "type": "string", "maxLength": 150 },
+        "status": { "type": "string", "enum": ["Active", "Inactive", "Resigned"] },
+        "attendanceMachineId": { "type": "string", "maxLength": 64 },
+        "shiftSchedule": { "type": "string", "maxLength": 64 },
+        "leavePolicy": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["super_admin", "director", "deputy_director", "assistant_director", "admin_incharge", "coordinator", "dept_head", "teacher", "staff"] },
+        "authUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "designation", "department", "status", "role", "createdAt", "updatedAt"]
+    },
+    "EmployeePrivateInfo": {
+      "title": "EmployeePrivateInfo",
+      "description": "Isolated PII sub-document for an institutional employee (email, phone, NID).",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "nidOrPassport": { "type": "string", "maxLength": 80 },
+        "bloodGroup": { "type": "string", "maxLength": 16 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "phone", "updatedAt"]
+    },
+    "EmailBinding": {
+      "title": "EmailBinding",
+      "description": "Zero-PII SHA-256 email hash to ASDRI employeeId lookup document for cross-device Google Sign-In.",
+      "type": "object",
+      "properties": {
+        "hashId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "role": { "type": "string", "enum": ["super_admin", "director", "deputy_director", "assistant_director", "admin_incharge", "coordinator", "dept_head", "teacher", "staff"] },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hashId", "employeeId", "displayName", "role", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "DailyAttendanceRecord": {
+      "title": "DailyAttendanceRecord",
+      "description": "Daily attendance record for an employee with punch sessions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "department": { "type": "string", "maxLength": 120 },
+        "date": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "firstInTime": { "type": "string", "maxLength": 16 },
+        "lastOutTime": { "type": "string", "maxLength": 16 },
+        "isCurrentlyIn": { "type": "boolean" },
+        "isMissingPunch": { "type": "boolean" },
+        "sessions": { "type": "array" },
+        "totalWorkingDurationMinutes": { "type": "number" },
+        "breakDurationMinutes": { "type": "number" },
+        "lateDurationMinutes": { "type": "number" },
+        "earlyLeaveMinutes": { "type": "number" },
+        "status": { "type": "string", "enum": ["Present", "Late", "Absent", "Leave", "Half Day", "Missing Punch"] },
+        "leaveType": { "type": "string", "maxLength": 80 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "verificationStatus": { "type": "string", "maxLength": 64 },
+        "remarks": { "type": "string", "maxLength": 500 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "employeeId", "employeeName", "date", "status", "totalWorkingDurationMinutes", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "RawPunchEvent": {
+      "title": "RawPunchEvent",
+      "description": "Individual raw attendance punch event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "machineId": { "type": "string", "maxLength": 64 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "attendanceMachineId": { "type": "string", "maxLength": 64 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "punchDate": { "type": "string", "maxLength": 16 },
+        "punchTime": { "type": "string", "maxLength": 16 },
+        "punchType": { "type": "string", "enum": ["IN", "OUT", "UNKNOWN"] },
+        "verificationType": { "type": "string", "maxLength": 64 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "syncStatus": { "type": "string", "enum": ["synced", "pending", "duplicate_skipped"] },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "employeeId", "punchDate", "punchTime", "punchType", "syncStatus", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "AttendanceCorrection": {
+      "title": "AttendanceCorrection",
+      "description": "Employee attendance correction request.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "department": { "type": "string", "maxLength": 120 },
+        "date": { "type": "string", "maxLength": 16 },
+        "requestedType": { "type": "string", "enum": ["IN", "OUT", "BOTH"] },
+        "correctedInTime": { "type": "string", "maxLength": 16 },
+        "correctedOutTime": { "type": "string", "maxLength": 16 },
+        "beforeInTime": { "type": "string", "maxLength": 16 },
+        "beforeOutTime": { "type": "string", "maxLength": 16 },
+        "beforeStatus": { "type": "string", "maxLength": 64 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "approverId": { "type": "string", "maxLength": 64 },
+        "approverName": { "type": "string", "maxLength": 150 },
+        "approvalRemarks": { "type": "string", "maxLength": 500 },
+        "appliedAt": { "type": "string", "maxLength": 64 },
+        "reviewedAt": { "type": "string", "maxLength": 64 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "employeeId", "employeeName", "date", "requestedType", "reason", "status", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "LeaveBalance": {
+      "title": "LeaveBalance",
+      "description": "Annual leave balance and custom quota for an employee.",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "year": { "type": "number" },
+        "casualLeaveTotal": { "type": "number" },
+        "casualLeaveUsed": { "type": "number" },
+        "sickLeaveTotal": { "type": "number" },
+        "sickLeaveUsed": { "type": "number" },
+        "earnedLeaveTotal": { "type": "number" },
+        "earnedLeaveUsed": { "type": "number" },
+        "dutyLeaveUsed": { "type": "number" },
+        "isCustomQuota": { "type": "boolean" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["employeeId", "year", "casualLeaveTotal", "casualLeaveUsed", "sickLeaveTotal", "sickLeaveUsed", "earnedLeaveTotal", "earnedLeaveUsed", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "LeaveApplication": {
+      "title": "LeaveApplication",
+      "description": "Employee leave request and multi-tier approval record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "department": { "type": "string", "maxLength": 120 },
+        "leaveType": { "type": "string", "maxLength": 80 },
+        "startDate": { "type": "string", "maxLength": 16 },
+        "endDate": { "type": "string", "maxLength": 16 },
+        "totalDays": { "type": "number" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "contactDuringLeave": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["Pending_Dept_Head", "Pending_Director", "Approved", "Rejected", "Cancelled"] },
+        "appliedDate": { "type": "string", "maxLength": 32 },
+        "reviewedDate": { "type": "string", "maxLength": 32 },
+        "directorRemarks": { "type": "string", "maxLength": 500 },
+        "directorReviewerId": { "type": "string", "maxLength": 64 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "employeeId", "employeeName", "leaveType", "startDate", "endDate", "totalDays", "reason", "status", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "ActionTrackerItem": {
+      "title": "ActionTrackerItem",
+      "description": "Institutional decision or work tracker item with Google Drive attachment metadata.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serialNo": { "type": "number" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "description": { "type": "string", "maxLength": 3000 },
+        "assignedPersonText": { "type": "string", "maxLength": 300 },
+        "assignedEmployeeIds": { "type": "array" },
+        "assigneeUids": { "type": "array" },
+        "priority": { "type": "string", "maxLength": 32 },
+        "startDate": { "type": "string", "maxLength": 32 },
+        "deadline": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "maxLength": 32 },
+        "progressPercentage": { "type": "number" },
+        "latestUpdate": { "type": "string", "maxLength": 1000 },
+        "submissionReport": { "type": "string", "maxLength": 3000 },
+        "submissionFiles": { "type": "array" },
+        "submittedAt": { "type": "string", "maxLength": 32 },
+        "submittedBy": { "type": "string", "maxLength": 150 },
+        "nextAction": { "type": "string", "maxLength": 500 },
+        "followupDate": { "type": "string", "maxLength": 32 },
+        "completionDate": { "type": "string", "maxLength": 32 },
+        "meetingTitle": { "type": "string", "maxLength": 200 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "serialNo", "title", "status", "progressPercentage", "deadline", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "Institutional meeting schedule, attendees, minutes, and decisions linked with the annual calendar.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "meetingType": { "type": "string", "maxLength": 120 },
+        "date": { "type": "string", "maxLength": 32 },
+        "startTime": { "type": "string", "maxLength": 16 },
+        "endTime": { "type": "string", "maxLength": 16 },
+        "venue": { "type": "string", "maxLength": 200 },
+        "chairperson": { "type": "string", "maxLength": 150 },
+        "secretary": { "type": "string", "maxLength": 150 },
+        "department": { "type": "string", "maxLength": 120 },
+        "participants": { "type": "array" },
+        "participantUids": { "type": "array" },
+        "invitedEmployeeIds": { "type": "array" },
+        "actualAttendeeIds": { "type": "array" },
+        "agenda": { "type": "array" },
+        "meetingNotes": { "type": "string", "maxLength": 5000 },
+        "finalDecisions": { "type": "array" },
+        "approvalStatus": { "type": "string", "enum": ["Draft", "Published_Official", "Archived"] },
+        "meetingStatus": { "type": "string", "enum": ["Scheduled", "Minutes_Added"] },
+        "calendarEventId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "date", "approvalStatus", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "TaskItem": {
+      "title": "TaskItem",
+      "description": "Assigned task converted from meeting decisions or admin assignment.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "description": { "type": "string", "maxLength": 3000 },
+        "assignedPersonId": { "type": "string", "maxLength": 64 },
+        "assignedPersonName": { "type": "string", "maxLength": 150 },
+        "assigneeUid": { "type": "string", "maxLength": 128 },
+        "deadline": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "maxLength": 48 },
+        "progressPercentage": { "type": "number" },
+        "submissionFiles": { "type": "array" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "assignedPersonId", "status", "progressPercentage", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "Annual institutional calendar event (holiday, exam, academic activity, meeting, special working day).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 1500 },
+        "category": { "type": "string", "enum": ["Holiday", "Academic", "Exam", "Event", "Special_Working_Day", "Meeting"] },
+        "startDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "endDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "timeLabel": { "type": "string", "maxLength": 80 },
+        "location": { "type": "string", "maxLength": 200 },
+        "department": { "type": "string", "maxLength": 120 },
+        "linkedMeetingId": { "type": "string", "maxLength": 128 },
+        "createdBy": { "type": "string", "maxLength": 150 },
+        "isPublicCalendar": { "type": "boolean" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "category", "startDate", "endDate", "isPublicCalendar", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "InAppNotification": {
+      "title": "InAppNotification",
+      "description": "Targeted notification for a staff member or admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recipientEmployeeId": { "type": "string", "maxLength": 64 },
+        "recipientName": { "type": "string", "maxLength": 150 },
+        "recipientUid": { "type": "string", "maxLength": 128 },
+        "senderEmployeeId": { "type": "string", "maxLength": 64 },
+        "senderName": { "type": "string", "maxLength": 150 },
+        "senderUid": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 250 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "linkType": { "type": "string", "enum": ["task", "meeting", "leave", "tracker", "notice"] },
+        "isRead": { "type": "boolean" },
+        "priority": { "type": "string", "enum": ["normal", "urgent"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "recipientEmployeeId", "recipientUid", "senderUid", "title", "message", "linkType", "isRead", "priority", "createdAt", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable institutional audit trail log entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "actorId": { "type": "string", "maxLength": 64 },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "actorName": { "type": "string", "maxLength": 150 },
+        "actorRole": { "type": "string", "maxLength": 64 },
+        "action": { "type": "string", "maxLength": 100 },
+        "module": { "type": "string", "enum": ["Attendance", "Leave", "Task", "Meeting", "Employee", "Document", "System"] },
+        "details": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "actorId", "actorUid", "action", "module", "details", "createdAt"]
+    },
+    "InstitutionalSettings": {
+      "title": "InstitutionalSettings",
+      "description": "Institutional attendance or leave policy configuration document.",
+      "type": "object",
+      "properties": {
+        "settingType": { "type": "string", "enum": ["attendancePolicy", "institutionalLeavePolicy"] },
+        "updatedByUid": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["settingType", "updatedByUid", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Trusted admin privilege documents keyed by Firebase Auth UID."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Non-PII operational mapping for authenticated users."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "PII-isolated contact data for authenticated users."
+    },
+    "/employees/{employeeId}": {
+      "schema": { "$ref": "#/entities/EmployeeProfile" },
+      "description": "Non-PII institutional staff directory."
+    },
+    "/employees/{employeeId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/EmployeePrivateInfo" },
+      "description": "PII-isolated email, phone, and NID data for employees."
+    },
+    "/emailBindings/{hashId}": {
+      "schema": { "$ref": "#/entities/EmailBinding" },
+      "description": "SHA-256 email hash to ASDRI employeeId mapping for cross-device Google Sign-In without exposing PII."
+    },
+    "/attendanceRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/DailyAttendanceRecord" },
+      "description": "Daily attendance records and punch sessions."
+    },
+    "/rawPunches/{punchId}": {
+      "schema": { "$ref": "#/entities/RawPunchEvent" },
+      "description": "Raw punch events."
+    },
+    "/corrections/{correctionId}": {
+      "schema": { "$ref": "#/entities/AttendanceCorrection" },
+      "description": "Attendance correction applications."
+    },
+    "/leaveBalances/{balanceId}": {
+      "schema": { "$ref": "#/entities/LeaveBalance" },
+      "description": "Annual employee leave quota balances."
+    },
+    "/leaveApplications/{leaveId}": {
+      "schema": { "$ref": "#/entities/LeaveApplication" },
+      "description": "Leave applications."
+    },
+    "/actionTrackerItems/{itemId}": {
+      "schema": { "$ref": "#/entities/ActionTrackerItem" },
+      "description": "Decision tracker items and Google Drive submission attachments."
+    },
+    "/meetings/{meetingId}": {
+      "schema": { "$ref": "#/entities/Meeting" },
+      "description": "Institutional meetings."
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/TaskItem" },
+      "description": "Assigned tasks."
+    },
+    "/calendarEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/CalendarEvent" },
+      "description": "Annual institutional calendar events."
+    },
+    "/notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/InAppNotification" },
+      "description": "Targeted notifications."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable institutional audit trail."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/InstitutionalSettings" },
+      "description": "Institutional attendance and leave policy settings."
+    }
+  }
+}
