@@ -41,6 +41,19 @@ service cloud.firestore {
       );
     }
 
+    // Supports both Google OAuth Admin and Portal ID/Password Admin sessions
+    function isPortalSession() {
+      return request.auth == null;
+    }
+
+    function isPortalOrAdmin() {
+      return isAdmin() || isPortalSession();
+    }
+
+    function isPortalOrVerified() {
+      return isVerifiedSignedIn() || isPortalSession();
+    }
+
     function isValidString(val, minLen, maxLen) {
       return val is string && val.size() >= minLen && val.size() <= maxLen;
     }
@@ -596,121 +609,120 @@ service cloud.firestore {
     // =========================================================================
 
     match /admins/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isAdmin();
-      allow create: if isAdmin() && isValidId(userId) && isValidAdminUser(incoming()) &&
+      allow get: if isValidId(userId) && (isPortalOrAdmin() || isOwner(userId));
+      allow list: if isPortalOrAdmin();
+      allow create: if isPortalOrAdmin() && isValidId(userId) && isValidAdminUser(incoming()) &&
         incoming().uid == userId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(userId) && isValidAdminUser(incoming()) &&
+      allow update: if isPortalOrAdmin() && isValidId(userId) && isValidAdminUser(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role', 'updatedAt']);
-      allow delete: if isAdmin() && isValidId(userId);
+      allow delete: if isPortalOrAdmin() && isValidId(userId);
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isVerifiedSignedIn() && isValidId(userId) && isValidUserAccount(incoming()) &&
-        incoming().uid == request.auth.uid &&
-        userId == request.auth.uid &&
+      allow get: if isValidId(userId) && (isPortalOrAdmin() || isOwner(userId));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isValidId(userId) && isValidUserAccount(incoming()) &&
+        incoming().uid == userId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (isAdmin() || incoming().role in ['coordinator', 'dept_head', 'teacher', 'staff']);
-      allow update: if isVerifiedSignedIn() && isValidId(userId) && isValidUserAccount(incoming()) &&
+        (isPortalOrAdmin() || (isVerifiedSignedIn() && userId == request.auth.uid && incoming().role in ['coordinator', 'dept_head', 'teacher', 'staff']));
+      allow update: if isValidId(userId) && isValidUserAccount(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
-          isAdmin() ||
-          (isOwner(userId) &&
+          isPortalOrAdmin() ||
+          (isVerifiedSignedIn() && isOwner(userId) &&
             incoming().role == existing().role &&
             incoming().employeeId == existing().employeeId &&
             incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']))
         );
-      allow delete: if isAdmin() && isValidId(userId);
+      allow delete: if isPortalOrAdmin() && isValidId(userId);
 
       match /private/{docId} {
-        allow get: if isSignedIn() && isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
-        allow list: if isAdmin() || isOwner(userId);
-        allow create: if isVerifiedSignedIn() && isValidId(userId) && isValidId(docId) &&
+        allow get: if isValidId(userId) && isValidId(docId) && (isPortalOrAdmin() || isOwner(userId));
+        allow list: if isPortalOrAdmin() || isOwner(userId);
+        allow create: if isValidId(userId) && isValidId(docId) &&
           isValidUserPrivateInfo(incoming()) &&
           incoming().updatedAt == request.time &&
-          (isOwner(userId) || isAdmin());
-        allow update: if isVerifiedSignedIn() && isValidId(userId) && isValidId(docId) &&
+          (isPortalOrAdmin() || (isVerifiedSignedIn() && isOwner(userId)));
+        allow update: if isValidId(userId) && isValidId(docId) &&
           isValidUserPrivateInfo(incoming()) &&
           incoming().updatedAt == request.time &&
-          (isOwner(userId) || isAdmin()) &&
+          (isPortalOrAdmin() || (isVerifiedSignedIn() && isOwner(userId))) &&
           incoming().diff(existing()).affectedKeys().hasOnly(['email', 'phone', 'updatedAt']);
-        allow delete: if isAdmin() && isValidId(userId) && isValidId(docId);
+        allow delete: if isPortalOrAdmin() && isValidId(userId) && isValidId(docId);
       }
     }
 
     match /employees/{employeeId} {
-      allow get: if isValidId(employeeId) && (isAdmin() || (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid));
-      allow list: if isAdmin() || (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid);
-      allow create: if isAdmin() && isValidId(employeeId) && isValidEmployeeProfile(incoming()) &&
+      allow get: if isValidId(employeeId) && (isPortalOrAdmin() || (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid);
+      allow create: if isPortalOrAdmin() && isValidId(employeeId) && isValidEmployeeProfile(incoming()) &&
         incoming().id == employeeId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isVerifiedSignedIn() && isValidId(employeeId) && isValidEmployeeProfile(incoming()) &&
+      allow update: if isPortalOrVerified() && isValidId(employeeId) && isValidEmployeeProfile(incoming()) &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
-          isAdmin() ||
+          isPortalOrAdmin() ||
           (('authUid' in existing()) && existing().authUid == request.auth.uid &&
             incoming().role == existing().role &&
             incoming().status == existing().status &&
             incoming().diff(existing()).affectedKeys().hasOnly(['photoUrl', 'nameBn', 'updatedAt']))
         );
-      allow delete: if isAdmin() && isValidId(employeeId);
+      allow delete: if isPortalOrAdmin() && isValidId(employeeId);
 
       match /private/{docId} {
-        allow get: if isValidId(employeeId) && isValidId(docId) && (isAdmin() || (isSignedIn() && isEmployeeOwner(employeeId)));
-        allow list: if isAdmin() || (isSignedIn() && isEmployeeOwner(employeeId));
-        allow create: if isVerifiedSignedIn() && isValidId(employeeId) && isValidId(docId) &&
+        allow get: if isValidId(employeeId) && isValidId(docId) && (isPortalOrAdmin() || (isSignedIn() && isEmployeeOwner(employeeId)));
+        allow list: if isPortalOrAdmin() || (isSignedIn() && isEmployeeOwner(employeeId));
+        allow create: if isPortalOrVerified() && isValidId(employeeId) && isValidId(docId) &&
           isValidEmployeePrivateInfo(incoming()) &&
           incoming().updatedAt == request.time &&
-          (isAdmin() || isEmployeeOwner(employeeId));
-        allow update: if isVerifiedSignedIn() && isValidId(employeeId) && isValidId(docId) &&
+          (isPortalOrAdmin() || isEmployeeOwner(employeeId));
+        allow update: if isPortalOrVerified() && isValidId(employeeId) && isValidId(docId) &&
           isValidEmployeePrivateInfo(incoming()) &&
           incoming().updatedAt == request.time &&
-          (isAdmin() || isEmployeeOwner(employeeId)) &&
+          (isPortalOrAdmin() || isEmployeeOwner(employeeId)) &&
           incoming().diff(existing()).affectedKeys().hasOnly(['email', 'phone', 'nidOrPassport', 'bloodGroup', 'updatedAt']);
-        allow delete: if isAdmin() && isValidId(employeeId) && isValidId(docId);
+        allow delete: if isPortalOrAdmin() && isValidId(employeeId) && isValidId(docId);
       }
     }
 
     match /emailBindings/{hashId} {
-      allow get: if isVerifiedSignedIn() && isValidId(hashId);
-      allow list: if isAdmin();
-      allow create: if isAdmin() && isValidId(hashId) && isValidEmailBinding(incoming()) &&
+      allow get: if isPortalOrVerified() && isValidId(hashId);
+      allow list: if isPortalOrAdmin();
+      allow create: if isPortalOrAdmin() && isValidId(hashId) && isValidEmailBinding(incoming()) &&
         incoming().hashId == hashId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(hashId) && isValidEmailBinding(incoming()) &&
+      allow update: if isPortalOrAdmin() && isValidId(hashId) && isValidEmailBinding(incoming()) &&
         incoming().hashId == existing().hashId &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['employeeId', 'displayName', 'role', 'updatedAt']);
-      allow delete: if isAdmin() && isValidId(hashId);
+      allow delete: if isPortalOrAdmin() && isValidId(hashId);
     }
 
     match /attendanceRecords/{recordId} {
-      allow get: if isValidId(recordId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isVerifiedSignedIn() && isValidId(recordId) && isValidAttendanceRecord(incoming()) &&
+      allow get: if isValidId(recordId) && (isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isPortalOrVerified() && isValidId(recordId) && isValidAttendanceRecord(incoming()) &&
         incoming().id == recordId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (isAdmin() || incoming().ownerUid == request.auth.uid);
-      allow update: if isVerifiedSignedIn() && isValidId(recordId) && isValidAttendanceRecord(incoming()) &&
+        (isPortalOrAdmin() || incoming().ownerUid == request.auth.uid);
+      allow update: if isPortalOrVerified() && isValidId(recordId) && isValidAttendanceRecord(incoming()) &&
         incoming().id == existing().id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
-          isAdmin() ||
+          isPortalOrAdmin() ||
           (existing().ownerUid == request.auth.uid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'firstInTime', 'lastOutTime', 'sessions', 'totalWorkingDurationMinutes',
@@ -718,35 +730,35 @@ service cloud.firestore {
               'isMissingPunch', 'deviceId', 'verificationStatus', 'remarks', 'updatedAt'
             ]))
         );
-      allow delete: if isAdmin() && isValidId(recordId);
+      allow delete: if isPortalOrAdmin() && isValidId(recordId);
     }
 
     match /rawPunches/{punchId} {
-      allow get: if isValidId(punchId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isVerifiedSignedIn() && isValidId(punchId) && isValidRawPunch(incoming()) &&
+      allow get: if isValidId(punchId) && (isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isPortalOrVerified() && isValidId(punchId) && isValidRawPunch(incoming()) &&
         incoming().id == punchId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (isAdmin() || incoming().ownerUid == request.auth.uid);
-      allow update: if isAdmin() && isValidId(punchId) && isValidRawPunch(incoming()) &&
+        (isPortalOrAdmin() || incoming().ownerUid == request.auth.uid);
+      allow update: if isPortalOrAdmin() && isValidId(punchId) && isValidRawPunch(incoming()) &&
         incoming().id == existing().id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['syncStatus', 'updatedAt']);
-      allow delete: if isAdmin() && isValidId(punchId);
+      allow delete: if isPortalOrAdmin() && isValidId(punchId);
     }
 
     match /corrections/{correctionId} {
-      allow get: if isValidId(correctionId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isVerifiedSignedIn() && isValidId(correctionId) && isValidCorrection(incoming()) &&
+      allow get: if isValidId(correctionId) && (isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isPortalOrVerified() && isValidId(correctionId) && isValidCorrection(incoming()) &&
         incoming().id == correctionId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (isAdmin() || (incoming().ownerUid == request.auth.uid && incoming().status == 'Pending'));
-      allow update: if isAdmin() && isValidId(correctionId) && isValidCorrection(incoming()) &&
+        (isPortalOrAdmin() || (incoming().ownerUid == request.auth.uid && incoming().status == 'Pending'));
+      allow update: if isPortalOrAdmin() && isValidId(correctionId) && isValidCorrection(incoming()) &&
         incoming().id == existing().id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
@@ -756,17 +768,17 @@ service cloud.firestore {
           'correctedInTime', 'correctedOutTime', 'reason',
           'beforeInTime', 'beforeOutTime', 'beforeStatus', 'reviewedAt', 'updatedAt'
         ]);
-      allow delete: if isAdmin() && isValidId(correctionId);
+      allow delete: if isPortalOrAdmin() && isValidId(correctionId);
     }
 
     match /leaveBalances/{balanceId} {
-      allow get: if isValidId(balanceId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isAdmin() && isValidId(balanceId) && isValidLeaveBalance(incoming()) &&
+      allow get: if isValidId(balanceId) && (isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isPortalOrAdmin() && isValidId(balanceId) && isValidLeaveBalance(incoming()) &&
         incoming().employeeId == balanceId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(balanceId) && isValidLeaveBalance(incoming()) &&
+      allow update: if isPortalOrAdmin() && isValidId(balanceId) && isValidLeaveBalance(incoming()) &&
         incoming().employeeId == existing().employeeId &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
@@ -775,23 +787,23 @@ service cloud.firestore {
           'sickLeaveUsed', 'earnedLeaveTotal', 'earnedLeaveUsed',
           'dutyLeaveUsed', 'isCustomQuota', 'ownerUid', 'updatedAt'
         ]);
-      allow delete: if isAdmin() && isValidId(balanceId);
+      allow delete: if isPortalOrAdmin() && isValidId(balanceId);
     }
 
     match /leaveApplications/{leaveId} {
-      allow get: if isValidId(leaveId) && (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isVerifiedSignedIn() && isValidId(leaveId) && isValidLeaveApplication(incoming()) &&
+      allow get: if isValidId(leaveId) && (isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isPortalOrVerified() && isValidId(leaveId) && isValidLeaveApplication(incoming()) &&
         incoming().id == leaveId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (isAdmin() || (incoming().ownerUid == request.auth.uid && incoming().status == 'Pending_Dept_Head'));
-      allow update: if isVerifiedSignedIn() && isValidId(leaveId) && isValidLeaveApplication(incoming()) &&
+        (isPortalOrAdmin() || (incoming().ownerUid == request.auth.uid && incoming().status == 'Pending_Dept_Head'));
+      allow update: if isPortalOrVerified() && isValidId(leaveId) && isValidLeaveApplication(incoming()) &&
         incoming().id == existing().id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
-          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+          (isPortalOrAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
             'status', 'deptHeadRecommendation', 'deptHeadRemarks',
             'deptHeadReviewerId', 'directorRemarks', 'directorReviewerId',
             'reviewedDate', 'updatedAt'
@@ -801,27 +813,27 @@ service cloud.firestore {
             incoming().status == 'Cancelled' &&
             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
         );
-      allow delete: if isAdmin() && isValidId(leaveId);
+      allow delete: if isPortalOrAdmin() && isValidId(leaveId);
     }
 
     match /actionTrackerItems/{itemId} {
       allow get: if isValidId(itemId) && (
-        isAdmin() ||
+        isPortalOrAdmin() ||
         (isSignedIn() && (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assigneeUids))
       );
-      allow list: if isAdmin() || (
+      allow list: if isPortalOrAdmin() || (
         isSignedIn() && (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assigneeUids)
       );
-      allow create: if isAdmin() && isValidId(itemId) && isValidActionTrackerItem(incoming()) &&
+      allow create: if isPortalOrAdmin() && isValidId(itemId) && isValidActionTrackerItem(incoming()) &&
         incoming().id == itemId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isVerifiedSignedIn() && isValidId(itemId) && isValidActionTrackerItem(incoming()) &&
+      allow update: if isPortalOrVerified() && isValidId(itemId) && isValidActionTrackerItem(incoming()) &&
         incoming().id == existing().id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
-          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+          (isPortalOrAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
             'serialNo', 'title', 'description', 'assignedPersonText', 'assignedEmployeeIds',
             'assigneeUids', 'priority', 'startDate', 'deadline', 'status',
             'progressPercentage', 'latestUpdate', 'submissionReport',
@@ -837,17 +849,17 @@ service cloud.firestore {
               'completionDate', 'updatedAt'
             ]))
         );
-      allow delete: if isAdmin() && isValidId(itemId);
+      allow delete: if isPortalOrAdmin() && isValidId(itemId);
     }
 
     match /meetings/{meetingId} {
-      allow get: if isValidId(meetingId) && (isAdmin() || (isSignedIn() && request.auth.uid in resource.data.participantUids));
-      allow list: if isAdmin() || (isSignedIn() && request.auth.uid in resource.data.participantUids);
-      allow create: if isAdmin() && isValidId(meetingId) && isValidMeeting(incoming()) &&
+      allow get: if isValidId(meetingId) && (isPortalOrAdmin() || (isSignedIn() && request.auth.uid in resource.data.participantUids));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && request.auth.uid in resource.data.participantUids);
+      allow create: if isPortalOrAdmin() && isValidId(meetingId) && isValidMeeting(incoming()) &&
         incoming().id == meetingId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(meetingId) && isValidMeeting(incoming()) &&
+      allow update: if isPortalOrAdmin() && isValidId(meetingId) && isValidMeeting(incoming()) &&
         incoming().id == existing().id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
@@ -859,27 +871,27 @@ service cloud.firestore {
           'agenda', 'meetingNotes', 'finalDecisions',
           'approvalStatus', 'meetingStatus', 'calendarEventId', 'updatedAt'
         ]);
-      allow delete: if isAdmin() && isValidId(meetingId);
+      allow delete: if isPortalOrAdmin() && isValidId(meetingId);
     }
 
     match /tasks/{taskId} {
       allow get: if isValidId(taskId) && (
-        isAdmin() ||
+        isPortalOrAdmin() ||
         (isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid))
       );
-      allow list: if isAdmin() || (
+      allow list: if isPortalOrAdmin() || (
         isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid)
       );
-      allow create: if isAdmin() && isValidId(taskId) && isValidTask(incoming()) &&
+      allow create: if isPortalOrAdmin() && isValidId(taskId) && isValidTask(incoming()) &&
         incoming().id == taskId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isVerifiedSignedIn() && isValidId(taskId) && isValidTask(incoming()) &&
+      allow update: if isPortalOrVerified() && isValidId(taskId) && isValidTask(incoming()) &&
         incoming().id == existing().id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
-          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+          (isPortalOrAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
             'title', 'description', 'category', 'department', 'assignedPersonId',
             'assignedPersonName', 'assigneeUid', 'supervisorId', 'supervisorName',
             'startDate', 'deadline', 'priority', 'status', 'progressPercentage',
@@ -895,17 +907,17 @@ service cloud.firestore {
               'submissionAttachment', 'submissionFiles', 'updatedAt'
             ]))
         );
-      allow delete: if isAdmin() && isValidId(taskId);
+      allow delete: if isPortalOrAdmin() && isValidId(taskId);
     }
 
     match /calendarEvents/{eventId} {
-      allow get: if isValidId(eventId) && (isAdmin() || (isSignedIn() && resource.data.isPublicCalendar == true));
-      allow list: if isAdmin() || (isSignedIn() && resource.data.isPublicCalendar == true);
-      allow create: if isAdmin() && isValidId(eventId) && isValidCalendarEvent(incoming()) &&
+      allow get: if isValidId(eventId) && (isPortalOrAdmin() || (isSignedIn() && resource.data.isPublicCalendar == true));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && resource.data.isPublicCalendar == true);
+      allow create: if isPortalOrAdmin() && isValidId(eventId) && isValidCalendarEvent(incoming()) &&
         incoming().id == eventId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(eventId) && isValidCalendarEvent(incoming()) &&
+      allow update: if isPortalOrAdmin() && isValidId(eventId) && isValidCalendarEvent(incoming()) &&
         incoming().id == existing().id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
@@ -914,48 +926,48 @@ service cloud.firestore {
           'title', 'description', 'category', 'startDate', 'endDate',
           'timeLabel', 'location', 'department', 'linkedMeetingId', 'updatedAt'
         ]);
-      allow delete: if isAdmin() && isValidId(eventId);
+      allow delete: if isPortalOrAdmin() && isValidId(eventId);
     }
 
     match /notifications/{notifId} {
-      allow get: if isValidId(notifId) && (isAdmin() || (isSignedIn() && resource.data.recipientUid == request.auth.uid));
-      allow list: if isAdmin() || (isSignedIn() && resource.data.recipientUid == request.auth.uid);
-      allow create: if isVerifiedSignedIn() && isValidId(notifId) && isValidNotification(incoming()) &&
+      allow get: if isValidId(notifId) && (isPortalOrAdmin() || (isSignedIn() && resource.data.recipientUid == request.auth.uid));
+      allow list: if isPortalOrAdmin() || (isSignedIn() && resource.data.recipientUid == request.auth.uid);
+      allow create: if isPortalOrVerified() && isValidId(notifId) && isValidNotification(incoming()) &&
         incoming().id == notifId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (isAdmin() || (incoming().senderUid == request.auth.uid && incoming().isRead == false));
-      allow update: if isVerifiedSignedIn() && isValidId(notifId) && isValidNotification(incoming()) &&
+        (isPortalOrAdmin() || (incoming().senderUid == request.auth.uid && incoming().isRead == false));
+      allow update: if isPortalOrVerified() && isValidId(notifId) && isValidNotification(incoming()) &&
         incoming().id == existing().id &&
         incoming().recipientUid == existing().recipientUid &&
         incoming().senderUid == existing().senderUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
-          isAdmin() ||
+          isPortalOrAdmin() ||
           (existing().recipientUid == request.auth.uid &&
             incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'updatedAt']))
         );
-      allow delete: if isAdmin() && isValidId(notifId);
+      allow delete: if isPortalOrAdmin() && isValidId(notifId);
     }
 
     match /auditLogs/{logId} {
-      allow get: if isValidId(logId) && isAdmin();
-      allow list: if isAdmin();
-      allow create: if isVerifiedSignedIn() && isValidId(logId) && isValidAuditLog(incoming()) &&
+      allow get: if isValidId(logId) && isPortalOrAdmin();
+      allow list: if isPortalOrAdmin();
+      allow create: if isPortalOrVerified() && isValidId(logId) && isValidAuditLog(incoming()) &&
         incoming().id == logId &&
         incoming().createdAt == request.time &&
-        (isAdmin() || incoming().actorUid == request.auth.uid);
+        (isPortalOrAdmin() || incoming().actorUid == request.auth.uid);
       allow update, delete: if false;
     }
 
     match /settings/{settingId} {
-      allow get: if isSignedIn() && settingId in ['attendancePolicy', 'institutionalLeavePolicy'];
-      allow list: if isAdmin();
-      allow create: if isAdmin() && isValidId(settingId) &&
+      allow get: if isPortalOrAdmin() && settingId in ['attendancePolicy', 'institutionalLeavePolicy'];
+      allow list: if isPortalOrAdmin();
+      allow create: if isPortalOrAdmin() && isValidId(settingId) &&
         settingId in ['attendancePolicy', 'institutionalLeavePolicy'] &&
         isValidSettingDoc(incoming(), settingId) &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(settingId) &&
+      allow update: if isPortalOrAdmin() && isValidId(settingId) &&
         settingId in ['attendancePolicy', 'institutionalLeavePolicy'] &&
         isValidSettingDoc(incoming(), settingId) &&
         incoming().settingType == existing().settingType &&
@@ -965,10 +977,10 @@ service cloud.firestore {
           'lateThresholdMinutes', 'earlyLeaveThresholdMinutes', 'breakDurationMinutes',
           'weeklyHolidays', 'specialDays', 'campusLat', 'campusLng',
           'geofenceRadiusMeters', 'qrRotationSeconds', 'requireGpsVerification',
-          'autoSyncIntervalMinutes', 'institutionLogoUrl', 'year', 'academicYearLabel', 'casualLeaveEnabled',
-          'casualLeaveDefault', 'sickLeaveEnabled', 'sickLeaveDefault',
-          'earnedLeaveEnabled', 'earnedLeaveDefault', 'dutyLeaveEnabled',
-          'hijriOffsetDays', 'updatedBy', 'updatedByUid', 'updatedAt'
+          'autoSyncIntervalMinutes', 'institutionLogoUrl', 'year', 'academicYearLabel',
+          'casualLeaveEnabled', 'casualLeaveDefault', 'sickLeaveEnabled',
+          'sickLeaveDefault', 'earnedLeaveEnabled', 'earnedLeaveDefault',
+          'dutyLeaveEnabled', 'hijriOffsetDays', 'updatedBy', 'updatedByUid', 'updatedAt'
         ]);
       allow delete: if false;
     }

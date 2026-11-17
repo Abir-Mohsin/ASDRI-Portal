@@ -1,49 +1,92 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useApp, getDhakaDateTime } from '@/lib/store';
-import type { ZkDeviceStatus, ZkParsedPunch } from '@/lib/zkteco-parser';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Cpu,
-  RefreshCw,
-  Upload,
-  CheckCircle2,
-  AlertTriangle,
-  Download,
-  Copy,
   Check,
+  CircleCheck,
+  Copy,
+  Cpu,
+  Download,
+  FileText,
   Link2,
   Play,
+  RefreshCw,
   Server,
+  TriangleAlert,
+  Upload,
   Wifi,
-  FileText,
 } from 'lucide-react';
+import { getDhakaDateTime, useApp } from '@/lib/store';
+import { ZkDeviceStatus, ZkParsedPunch } from '@/lib/zkteco-parser';
 
 export function ZkTecoMachinePanel() {
   const { employees, updateEmployee, ingestZkMachinePunches, rawPunches } = useApp();
-
   const [devices, setDevices] = useState<ZkDeviceStatus[]>([]);
   const [bufferedPunches, setBufferedPunches] = useState<ZkParsedPunch[]>([]);
   const [unmappedPins, setUnmappedPins] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastPolledAt, setLastPolledAt] = useState<string>('');
+  const [lastPolledAt, setLastPolledAt] = useState('');
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'warning' | 'error';
     text: string;
   } | null>(null);
-
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [manualRawText, setManualRawText] = useState('');
   const [pinInputs, setPinInputs] = useState<Record<string, string>>({});
   const [savingEmpId, setSavingEmpId] = useState<string | null>(null);
   const [selectedEmpForPin, setSelectedEmpForPin] = useState<Record<string, string>>({});
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [localBridgeOnline, setLocalBridgeOnline] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const pollZkServer = useCallback(
-    async (showNotice = false) => {
+    async (showNotice: boolean = false) => {
       if (showNotice) setIsSyncing(true);
       try {
+        // 1) Try to pull from Local PC Bridge (http://127.0.0.1:8080/bridge-status) if running on this computer
+        try {
+          const bridgeController = new AbortController();
+          const timeoutId = setTimeout(() => bridgeController.abort(), 1200);
+          const localRes = await fetch('http://127.0.0.1:8080/bridge-status', {
+            cache: 'no-store',
+            signal: bridgeController.signal,
+          });
+          clearTimeout(timeoutId);
+          if (localRes.ok) {
+            setLocalBridgeOnline(true);
+            const bridgeData = await localRes.json();
+            const bridgeDevices = bridgeData.devices || [];
+            const bridgeLogs = bridgeData.pendingLogs || [];
+            for (const dev of bridgeDevices) {
+              await fetch('/api/zkteco/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  action: 'heartbeat',
+                  serialNumber: dev.sn || 'ZK-F09',
+                  deviceIp: dev.ip || '192.168.1.201',
+                }),
+              });
+            }
+            for (const item of bridgeLogs) {
+              await fetch('/api/zkteco/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  action: 'push_logs',
+                  serialNumber: item.sn || 'ZK-F09',
+                  deviceIp: item.ip || '192.168.1.201',
+                  rawLogs: item.raw || '',
+                }),
+              });
+            }
+          } else {
+            setLocalBridgeOnline(false);
+          }
+        } catch {
+          setLocalBridgeOnline(false);
+        }
+
+        // 2) Poll Cloud Server Store (/api/zkteco/status)
         const res = await fetch('/api/zkteco/status', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
@@ -76,7 +119,10 @@ export function ZkTecoMachinePanel() {
           } else if (showNotice) {
             setFeedback({
               type: 'success',
-              text: 'সার্ভারের সাথে সংযোগ যাচাই সম্পন্ন হয়েছে। নতুন কোনো বকেয়া পাঞ্চ নেই।',
+              text:
+                (data.devices || []).length > 0
+                  ? 'মেশিন সংযুক্ত আছে। নতুন কোনো বকেয়া পাঞ্চ নেই।'
+                  : 'সার্ভারের সাথে সংযোগ যাচাই সম্পন্ন হয়েছে। এখনো কোনো পাঞ্চ মেশিন থেকে সিগন্যাল আসেনি।',
             });
           }
         }
@@ -119,9 +165,10 @@ export function ZkTecoMachinePanel() {
     setSavingEmpId(empId);
     setFeedback(null);
     const cleanPin = pinValue.trim();
-    const res = await updateEmployee(empId, { attendanceMachineId: cleanPin });
+    const res = await updateEmployee(empId, {
+      attendanceMachineId: cleanPin,
+    });
     setSavingEmpId(null);
-
     if (res.ok) {
       setFeedback({
         type: 'success',
@@ -150,7 +197,6 @@ export function ZkTecoMachinePanel() {
     if (!file) return;
     setIsSyncing(true);
     setFeedback(null);
-
     try {
       const text = await file.text();
       const res = await fetch('/api/zkteco/status', {
@@ -167,7 +213,10 @@ export function ZkTecoMachinePanel() {
         const summary = ingestZkMachinePunches(data.punches || []);
         setUnmappedPins(summary.unmappedPins);
         setFeedback({
-          type: summary.unmappedPins.length > 0 && summary.processedCount === 0 ? 'warning' : 'success',
+          type:
+            summary.unmappedPins.length > 0 && summary.processedCount === 0
+              ? 'warning'
+              : 'success',
           text: `ফাইল (${file.name}) থেকে মোট ${data.parsedCount} টি পাঞ্চ পড়া হয়েছে এবং ${summary.processedCount} টি নতুন হাজিরা রেকর্ড Firestore-এ সংরক্ষিত হয়েছে।${
             summary.unmappedPins.length > 0
               ? ` (আন-ম্যাপড মেশিন আইডি: ${summary.unmappedPins.join(', ')})`
@@ -197,7 +246,6 @@ export function ZkTecoMachinePanel() {
     if (!manualRawText.trim()) return;
     setIsSyncing(true);
     setFeedback(null);
-
     try {
       const res = await fetch('/api/zkteco/status', {
         method: 'POST',
@@ -243,7 +291,6 @@ export function ZkTecoMachinePanel() {
     const pinToUse = (targetEmp.attendanceMachineId || targetEmp.id).trim();
     const dhaka = getDhakaDateTime();
     const sampleLine = `${pinToUse}\t${dhaka.dateStr} ${dhaka.timeStr}\t0\t1\t0\t0`;
-
     setIsSyncing(true);
     setFeedback(null);
     try {
@@ -253,7 +300,6 @@ export function ZkTecoMachinePanel() {
         headers: { 'Content-Type': 'text/plain' },
         body: sampleLine,
       });
-
       if (admsRes.ok) {
         await pollZkServer(false);
         setFeedback({
@@ -281,12 +327,10 @@ export function ZkTecoMachinePanel() {
       typeof window !== 'undefined'
         ? window.location.origin
         : 'https://ais-pre-yjs3245qv2nmmy7hnazsmq-86489289289.asia-southeast1.run.app';
-
     const scriptContent = `/**
- * ASDRI ZKTeco F09 Local HTTP-to-Cloud ADMS Relay Bridge
- * ------------------------------------------------------
- * যদি আপনার ZKTeco F09 মেশিন সরাসরি HTTPS (Port 443) সাপোর্ট না করে,
- * তবে অফিসের যেকোনো কম্পিউটারে Node.js ইনস্টল রেখে এই ফাইলটি চালান:
+ * ASDRI ZKTeco F09 Local HTTP-to-Cloud ADMS Relay Bridge (v2)
+ * -----------------------------------------------------------
+ * অফিসের যেকোনো কম্পিউটারে Node.js ইনস্টল রেখে এই ফাইলটি চালান:
  *
  *   node zk-f09-bridge.js
  */
@@ -298,6 +342,10 @@ const { URL } = require('url');
 
 const CLOUD_PORTAL_ORIGIN = process.env.CLOUD_PORTAL_ORIGIN || '${originUrl}';
 const LOCAL_PORT = Number(process.env.PORT || 8080);
+
+// ইন-মেমরি বাফার যাতে ব্রাউজার (http://127.0.0.1:8080/bridge-status) সরাসরি ডেটা টেনে নিতে পারে
+const deviceMap = new Map();
+const pendingLogs = [];
 
 function getLocalLanIp() {
   const nets = os.networkInterfaces();
@@ -339,21 +387,65 @@ function forwardToCloud(pathWithQuery, method, bodyText, callback) {
 }
 
 const server = http.createServer((req, res) => {
+  // CORS headers so the open ASDRI Portal browser tab can read from 127.0.0.1:8080
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   const reqUrl = req.url || '/';
+
+  if (reqUrl.startsWith('/bridge-status')) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        devices: Array.from(deviceMap.values()),
+        pendingLogs: pendingLogs.slice(-200),
+      })
+    );
+    return;
+  }
+
   let body = '';
   req.on('data', (chunk) => {
     body += chunk.toString();
   });
   req.on('end', () => {
     if (reqUrl.startsWith('/iclock/')) {
-      console.log('[ZKTeco F09 Punch/Sync]', req.method, reqUrl, body ? body.trim() : '');
+      const parsedUrl = new URL(reqUrl, 'http://localhost');
+      const sn = parsedUrl.searchParams.get('SN') || parsedUrl.searchParams.get('sn') || 'ZK-F09';
+      const remoteIp = (req.socket.remoteAddress || '').replace('::ffff:', '') || '192.168.1.201';
+
+      deviceMap.set(sn, {
+        sn,
+        ip: remoteIp,
+        lastSeen: new Date().toISOString(),
+      });
+
+      if (req.method === 'POST' && body && body.trim()) {
+        pendingLogs.push({
+          sn,
+          ip: remoteIp,
+          raw: body.trim(),
+          at: new Date().toISOString(),
+        });
+        if (pendingLogs.length > 500) pendingLogs.shift();
+      }
+
+      console.log('[ZKTeco F09 Signal]', req.method, reqUrl, 'from', remoteIp, body ? body.trim() : '');
       forwardToCloud(reqUrl, req.method || 'GET', body, (err, status, cloudResp) => {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
         if (err) {
-          console.error('[Cloud Relay Error]', err.message);
           res.end('OK\\n');
         } else {
-          res.end(cloudResp || 'OK\\n');
+          res.end(cloudResp && cloudResp.includes('OK') ? cloudResp : 'OK\\n');
         }
       });
     } else {
@@ -366,19 +458,21 @@ const server = http.createServer((req, res) => {
 server.listen(LOCAL_PORT, '0.0.0.0', () => {
   const lanIp = getLocalLanIp();
   console.log('============================================================');
-  console.log('  ASDRI ZKTeco F09 Local ADMS Bridge চালু হয়েছে!');
+  console.log('  ASDRI ZKTeco F09 Local ADMS Bridge (v2) চালু হয়েছে!');
   console.log('------------------------------------------------------------');
   console.log('  এখন ZKTeco F09 মেশিনের Menu -> Comm. -> Cloud Server-এ বসান:');
   console.log('  1) Enable Domain Name : OFF');
   console.log('  2) Server Address     : ' + lanIp);
   console.log('  3) Server Port        : ' + LOCAL_PORT);
   console.log('------------------------------------------------------------');
-  console.log('  Cloud Target URL      : ' + CLOUD_PORTAL_ORIGIN);
+  console.log('  এই কম্পিউটারে ব্রাউজারে ASDRI পোর্টাল খোলা রাখলে স্বয়ংক্রিয় সিঙ্ক হবে।');
   console.log('============================================================');
 });
 `;
 
-    const blob = new Blob([scriptContent], { type: 'application/javascript;charset=utf-8' });
+    const blob = new Blob([scriptContent], {
+      type: 'application/javascript;charset=utf-8',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -391,16 +485,14 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
 
   const hostDomain =
     typeof window !== 'undefined'
-      ? window.location.hostname
+      ? window.location.host
       : 'ais-pre-yjs3245qv2nmmy7hnazsmq-86489289289.asia-southeast1.run.app';
-
   const zkMachinePunchesCount = rawPunches.filter(
     (p) => p.machineId && p.machineId !== 'MOBILE-GPS-QR'
   ).length;
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Quick Actions */}
       <div className="bg-emerald-950 text-white rounded-xl p-4 sm:p-6 border border-emerald-800 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-emerald-900/90 border border-emerald-700 text-amber-300 text-[11px] font-bold">
@@ -415,7 +507,6 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
             <strong>ADMS / Cloud Server Setting</strong> ব্যবহার করে রিয়েল-টাইম ফিঙ্গারপ্রিন্ট ও কার্ড পাঞ্চ সরাসরি এই পোর্টালে এবং Firestore ডাটাবেসে সিঙ্ক করুন।
           </p>
         </div>
-
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
             type="button"
@@ -426,7 +517,6 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
             <span>এখনই মেশিন সিঙ্ক করুন</span>
           </button>
-
           <button
             type="button"
             disabled={isSyncing}
@@ -445,15 +535,15 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
             feedback.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
               : feedback.type === 'warning'
-              ? 'bg-amber-50 border-amber-300 text-amber-950'
-              : 'bg-rose-50 border-rose-200 text-rose-900'
+                ? 'bg-amber-50 border-amber-300 text-amber-950'
+                : 'bg-rose-50 border-rose-200 text-rose-900'
           }`}
         >
           <div className="flex items-start gap-2">
             {feedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <CircleCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             ) : (
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <TriangleAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             )}
             <span>{feedback.text}</span>
           </div>
@@ -467,16 +557,14 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
         </div>
       )}
 
-      {/* Unmapped Machine PIN Alert (if someone punched on F09 before their PIN was linked) */}
       {unmappedPins.length > 0 && (
         <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 space-y-3">
           <div className="flex items-start gap-2.5 text-xs text-amber-950">
-            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <TriangleAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <strong>আন-ম্যাপড মেশিন আইডি শনাক্ত হয়েছে ({unmappedPins.length} টি):</strong> মেশিন থেকে নিচের User ID / PIN দিয়ে পাঞ্চ এসেছে, কিন্তু এখনো কোনো শিক্ষক বা স্টাফের প্রোফাইলে এই মেশিন আইডি বসানো হয়নি। নিচে প্রোফাইল সিলেক্ট করে লিংক করে দিন:
             </div>
           </div>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {unmappedPins.map((pin) => (
               <div
@@ -491,7 +579,10 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
                   <select
                     value={selectedEmpForPin[pin] || ''}
                     onChange={(e) =>
-                      setSelectedEmpForPin((prev) => ({ ...prev, [pin]: e.target.value }))
+                      setSelectedEmpForPin((prev) => ({
+                        ...prev,
+                        [pin]: e.target.value,
+                      }))
                     }
                     className="flex-1 px-2.5 py-1.5 rounded border border-slate-300 text-xs bg-slate-50"
                   >
@@ -517,20 +608,29 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
         </div>
       )}
 
-      {/* 3 Status Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between text-xs text-slate-500">
             <span>সংযুক্ত ZKTeco মেশিন</span>
-            <Wifi className="w-4 h-4 text-emerald-700" />
+            <Wifi
+              className={`w-4 h-4 ${
+                devices.length > 0 || localBridgeOnline ? 'text-emerald-700' : 'text-amber-600'
+              }`}
+            />
           </div>
           <div className="text-xl font-extrabold text-slate-900 dark:text-white mt-1">
-            {devices.length > 0 ? `${devices.length} টি সক্রিয়` : 'অপেক্ষমাণ (Ready)'}
+            {devices.length > 0
+              ? `${devices.length} টি মেশিন সক্রিয়`
+              : localBridgeOnline
+                ? 'লোকাল ব্রিজ সংযুক্ত'
+                : 'মেশিন সংযুক্ত নয় (অপেক্ষমাণ)'}
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
             {devices[0]
               ? `SN: ${devices[0].serialNumber} · শেষ সিঙ্ক: ${lastPolledAt || 'এইমাত্র'}`
-              : 'এন্ডপয়েন্ট প্রস্তুত: /iclock/cdata'}
+              : localBridgeOnline
+                ? 'পিসি ব্রিজ (Port 8080) সচল — মেশিন পাঞ্চের অপেক্ষায়'
+                : 'এখনো কোনো ফিজিক্যাল মেশিন থেকে সিগন্যাল আসেনি'}
           </div>
         </div>
 
@@ -562,7 +662,6 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
         </div>
       </div>
 
-      {/* Section 1: ZKTeco F09 Physical Machine Setup Guide (Enable Domain Name, Server Address, Server Port) */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
           <div>
@@ -584,19 +683,16 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          {/* Option A: Direct Domain Mode */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="font-bold text-[#0f4c3a] dark:text-emerald-400 flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <CircleCheck className="w-4 h-4 shrink-0" />
               <span>পদ্ধতি ক: সরাসরি ডোমেইন মোড (Direct Cloud ADMS)</span>
             </div>
-
             <div className="space-y-2">
               <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700">
                 <span className="text-slate-500 font-semibold">Enable Domain Name:</span>
                 <span className="font-mono font-bold text-emerald-700">ON (চালু করুন)</span>
               </div>
-
               <div className="bg-white dark:bg-slate-900 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 font-semibold">Server Address:</span>
@@ -620,14 +716,12 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
                   {hostDomain}
                 </div>
               </div>
-
               <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700">
                 <span className="text-slate-500 font-semibold">Server Port:</span>
                 <span className="font-mono font-bold text-slate-900 dark:text-white">
                   443 (HTTPS) অথবা 80 (HTTP)
                 </span>
               </div>
-
               <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700">
                 <span className="text-slate-500 font-semibold">ADMS Push Endpoint:</span>
                 <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
@@ -637,14 +731,15 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
             </div>
           </div>
 
-          {/* Option B: Local Wi-Fi / LAN Bridge Mode for older F09 Firmware */}
           <div className="p-4 rounded-xl bg-amber-50/60 dark:bg-slate-800/40 border border-amber-200 dark:border-slate-800 space-y-3">
             <div className="font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
               <Server className="w-4 h-4 shrink-0" />
               <span>পদ্ধতি খ: লোকাল ওয়াইফাই ব্রিজ মোড (পুরোনো F09 মেশিনের জন্য)</span>
             </div>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-              অনেক <strong>ZKTeco F09</strong> মেশিনে বড় ডোমেইন নাম টাইপ করা যায় না অথবা মেশিনটি শুধু লোকাল <code>HTTP</code> সাপোর্ট করে। সেক্ষেত্রে উপরের <strong>&quot;অফিস পিসি ব্রিজ স্ক্রিপ্ট (zk-f09-bridge.js)&quot;</strong> ডাউনলোড করে অফিসের পিসিতে চালান এবং মেশিনে নিচের সেটিংস দিন:
+              অনেক <strong>ZKTeco F09</strong> মেশিনে বড় ডোমেইন নাম টাইপ করা যায় না অথবা মেশিনটি শুধু লোকাল{' '}
+              <code>HTTP</code> সাপোর্ট করে। সেক্ষেত্রে উপরের{' '}
+              <strong>&quot;অফিস পিসি ব্রিজ স্ক্রিপ্ট (zk-f09-bridge.js)&quot;</strong> ডাউনলোড করে অফিসের পিসিতে চালান এবং মেশিনে নিচের সেটিংস দিন:
             </p>
             <div className="space-y-1.5 font-mono text-[11px] bg-white dark:bg-slate-900 p-3 rounded-lg border border-amber-200">
               <div>
@@ -664,14 +759,14 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
         </div>
       </div>
 
-      {/* Section 2: Quick Employee Machine ID (PIN) Mapping Table */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4">
         <div>
           <h4 className="text-sm font-bold text-slate-900 dark:text-white">
             ২. শিক্ষক ও স্টাফদের প্রোফাইলে ZKTeco মেশিনের User ID / PIN যুক্ত করুন
           </h4>
           <p className="text-xs text-slate-500 mt-0.5">
-            ZKTeco F09 মেশিনে যার ফিঙ্গারপ্রিন্ট বা কার্ড যে নম্বরে (যেমন: <code>1</code>, <code>2</code>, <code>101</code>) রেজিস্টার করা আছে, নিচের ঘরে সেই নম্বরটি বসিয়ে <strong>সংরক্ষণ</strong> বাটনে ক্লিক করুন:
+            ZKTeco F09 মেশিনে যার ফিঙ্গারপ্রিন্ট বা কার্ড যে নম্বরে (যেমন: <code>1</code>, <code>2</code>,{' '}
+            <code>101</code>) রেজিস্টার করা আছে, নিচের ঘরে সেই নম্বরটি বসিয়ে <strong>সংরক্ষণ</strong> বাটনে ক্লিক করুন:
           </p>
         </div>
 
@@ -711,7 +806,10 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
                         type="text"
                         value={currentVal}
                         onChange={(e) =>
-                          setPinInputs((prev) => ({ ...prev, [emp.id]: e.target.value }))
+                          setPinInputs((prev) => ({
+                            ...prev,
+                            [emp.id]: e.target.value,
+                          }))
                         }
                         placeholder="যেমন: 1 বা 101"
                         className="w-36 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono font-bold text-slate-900 dark:text-white text-xs"
@@ -739,7 +837,6 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
         </div>
       </div>
 
-      {/* Section 3: USB Pen Drive (attlog.dat / CSV) Fallback & Manual Raw Push */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-3">
           <div className="flex items-center gap-2">
@@ -753,7 +850,6 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
             <strong>Data Mgt. ➔ Download AttLog</strong> দিয়ে নামানো <code>attlog.dat</code> বা{' '}
             <code>.txt/.csv</code> ফাইল এখানে আপলোড করলে স্বয়ংক্রিয়ভাবে সবার হাজিরা বসে যাবে।
           </p>
-
           <input
             ref={fileInputRef}
             type="file"
@@ -761,7 +857,6 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
             onChange={handleDatOrCsvFileUpload}
             className="hidden"
           />
-
           <button
             type="button"
             disabled={isSyncing}
@@ -787,7 +882,9 @@ server.listen(LOCAL_PORT, '0.0.0.0', () => {
             rows={3}
             value={manualRawText}
             onChange={(e) => setManualRawText(e.target.value)}
-            placeholder={'উদাহরণ:\n101\t2026-11-14 08:55:00\t0\t1\n101\t2026-11-14 17:05:00\t1\t1'}
+            placeholder={
+              'উদাহরণ:\n101\t2026-11-14 08:55:00\t0\t1\n101\t2026-11-14 17:05:00\t1\t1'
+            }
             className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
           />
           <button

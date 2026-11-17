@@ -6,85 +6,69 @@ import {
 } from '@/lib/zkteco-parser';
 
 /**
- * ZKTeco ADMS / Cloud Push Protocol Endpoint: `/iclock/cdata`
+ * ZKTeco ADMS / Push SDK Protocol Endpoint (`/iclock/cdata`)
+ * Works directly with ZKTeco F09 without any paid license.
  *
- * 1) Handshake: `GET /iclock/cdata?SN=<SerialNumber>&options=all&pushver=...`
- *    Returns plain-text configuration options so the ZKTeco F09 device marks cloud connection active.
+ * 1) Device Handshake:
+ *    `GET /iclock/cdata?SN=XXXX&options=all&pushver=2.2.14`
+ *    Returns ZKTeco ADMS configuration so the F09 machine pushes punches in real time.
  *
- * 2) Attendance & Operation Push: `POST /iclock/cdata?SN=<SerialNumber>&table=ATTLOG&Stamp=...`
- *    Parses tab-separated `ATTLOG` rows and responds with `OK: <count>` in plain text.
+ * 2) Real-Time Punch Log Push:
+ *    `POST /iclock/cdata?SN=XXXX&table=ATTLOG&Stamp=9999`
+ *    Body contains tab-separated lines: `<PIN>\t<YYYY-MM-DD HH:mm:ss>\t<Status>\t<VerifyMode>...`
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const sn = (searchParams.get('SN') || searchParams.get('sn') || 'ZK-F09').trim();
+  const sn = searchParams.get('SN') || searchParams.get('sn') || 'ZK-F09';
   const forwardedFor = req.headers.get('x-forwarded-for');
   const ip = forwardedFor ? forwardedFor.split(',')[0].trim() : '0.0.0.0';
 
   recordZkDeviceHandshake(sn, ip);
 
-  const configResponse = [
+  const responseText = [
     `GET OPTION FROM: ${sn}`,
     'ATTLOGStamp=None',
     'OPERLOGStamp=9999',
     'ATTPHOTOStamp=None',
     'ErrorDelay=30',
-    'Delay=10',
+    'Delay=5',
     'TransTimes=00:00;14:05',
     'TransInterval=1',
     'TransFlag=TransData AttLog\tOpLog',
     'TimeZone=6',
     'Realtime=1',
-    'Encrypt=0',
-    '',
-  ].join('\n');
+    'Encrypt=None',
+  ].join('\r\n');
 
-  return new NextResponse(configResponse, {
+  return new NextResponse(`${responseText}\r\n`, {
     status: 200,
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store',
     },
   });
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const sn = (searchParams.get('SN') || searchParams.get('sn') || 'ZK-F09').trim();
-    const table = (searchParams.get('table') || 'ATTLOG').trim().toUpperCase();
-    const forwardedFor = req.headers.get('x-forwarded-for');
-    const ip = forwardedFor ? forwardedFor.split(',')[0].trim() : '0.0.0.0';
+  const { searchParams } = new URL(req.url);
+  const sn = searchParams.get('SN') || searchParams.get('sn') || 'ZK-F09';
+  const table = (searchParams.get('table') || 'ATTLOG').toUpperCase();
+  const forwardedFor = req.headers.get('x-forwarded-for');
+  const ip = forwardedFor ? forwardedFor.split(',')[0].trim() : '0.0.0.0';
 
-    const rawBody = await req.text();
+  const rawBody = await req.text();
 
-    if (table === 'ATTLOG' || (! searchParams.get('table') && rawBody.trim().length > 0)) {
-      const parsedPunches = parseZkAttLogPayload(rawBody, sn);
-      appendZkPunchesToServerStore(parsedPunches, sn, ip);
-
-      return new NextResponse(`OK: ${parsedPunches.length}\n`, {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Cache-Control': 'no-store',
-        },
-      });
-    }
-
-    // For OPERLOG, ATTPHOTO, or USERINFO pushes, acknowledge with OK so device clears queue
-    recordZkDeviceHandshake(sn, ip);
-    return new NextResponse('OK\n', {
+  if (table === 'ATTLOG') {
+    const parsed = parseZkAttLogPayload(rawBody, sn);
+    appendZkPunchesToServerStore(parsed, sn, ip);
+    return new NextResponse(`OK: ${parsed.length}\n`, {
       status: 200,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-store',
-      },
-    });
-  } catch {
-    return new NextResponse('OK\n', {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-      },
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });
   }
+
+  recordZkDeviceHandshake(sn, ip);
+  return new NextResponse('OK\n', {
+    status: 200,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  });
 }

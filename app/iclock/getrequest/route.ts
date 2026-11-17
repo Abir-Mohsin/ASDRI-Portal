@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordZkDeviceHeartbeat } from '@/lib/zkteco-parser';
 
 /**
- * ZKTeco ADMS Heartbeat & Command Poll Endpoint: `/iclock/getrequest`
- * The ZKTeco F09 device periodically calls `GET /iclock/getrequest?SN=<SerialNumber>`
- * to check for pending server commands and keep its cloud connection status alive.
+ * ZKTeco ADMS / Push SDK Heartbeat & Command Polling Endpoint (`/iclock/getrequest`)
+ * Physical ZKTeco F09 devices periodically call `GET /iclock/getrequest?SN=XXXX`
+ * to check if the server has any pending commands and to report device heartbeat.
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const sn = (searchParams.get('SN') || searchParams.get('sn') || 'ZK-F09').trim();
+  const sn = searchParams.get('SN') || searchParams.get('sn') || 'ZK-F09';
   const forwardedFor = req.headers.get('x-forwarded-for');
   const ip = forwardedFor ? forwardedFor.split(',')[0].trim() : '0.0.0.0';
 
@@ -16,26 +16,10 @@ export async function GET(req: NextRequest) {
 
   return new NextResponse('OK\n', {
     status: 200,
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
   });
 }
 
 export async function POST(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const sn = (searchParams.get('SN') || searchParams.get('sn') || 'ZK-F09').trim();
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  const ip = forwardedFor ? forwardedFor.split(',')[0].trim() : '0.0.0.0';
-
-  recordZkDeviceHeartbeat(sn, ip);
-
-  return new NextResponse('OK\n', {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  });
+  return GET(req);
 }

@@ -18,8 +18,18 @@ import {
   CalendarEvent,
 } from './types';
 
-export const DEFAULT_INSTITUTION_LOGO =
-  '/assets/aistudio/AS-SUNNAH-DAWAH-Logo-Final-_Recovered_.png-single_d2c35833.png';
+export const DEFAULT_INSTITUTION_LOGO = '/icon.svg';
+
+export function resolveInstitutionLogo(url?: string): string {
+  if (
+    !url ||
+    !url.trim() ||
+    url.includes('AS-SUNNAH-DAWAH-Logo-Final-_Recovered_')
+  ) {
+    return DEFAULT_INSTITUTION_LOGO;
+  }
+  return url.trim();
+}
 
 export const INITIAL_POLICY: AttendancePolicyConfig = {
   officeStartTime: '09:00',

@@ -51,6 +51,7 @@ import {
   fetchFirestoreVerificationStats,
   type FirestoreVerificationStats,
 } from './firestore-sync';
+import { parseZkAttLogPayload, type ZkParsedPunch } from './zkteco-parser';
 import {
   Employee,
   DailyAttendanceRecord,
@@ -94,13 +95,6 @@ import {
   INITIAL_CALENDAR_EVENTS,
 } from './initial-data';
 import { enumerateDateRange } from './calendar-utils';
-import { parseZkAttLogPayload, type ZkParsedPunch } from './zkteco-parser';
-
-export interface ZkIngestSummary {
-  processedCount: number;
-  matchedCount: number;
-  unmappedPins: string[];
-}
 
 export function getDhakaDateTime(): { dateStr: string; timeStr: string; shortTime: string } {
   const now = new Date();
@@ -267,12 +261,17 @@ interface AppContextType {
     }
   ) => void;
   createCalendarEvent: (event: Omit<CalendarEvent, 'id' | 'createdAt'>) => void;
+  createCalendarEventsBatch: (events: Omit<CalendarEvent, 'id' | 'createdAt'>[]) => void;
   updateCalendarEvent: (id: string, updates: Partial<CalendarEvent>) => void;
   deleteCalendarEvent: (id: string) => void;
   recordManualPunch: (empId: string, punchType: 'IN' | 'OUT', verificationType: string) => void;
+  ingestZkMachinePunches: (incomingPunches: ZkParsedPunch[]) => {
+    processedCount: number;
+    matchedCount: number;
+    unmappedPins: string[];
+  };
   simulateMachineSync: () => { newCount: number };
   importMachineLogsCSV: (csvText: string) => number;
-  ingestZkMachinePunches: (punches: ZkParsedPunch[]) => ZkIngestSummary;
   submitCorrectionRequest: (req: Omit<AttendanceCorrectionRequest, 'id' | 'status' | 'appliedAt'>) => void;
   approveCorrectionRequest: (id: string, approverRemarks?: string) => void;
   rejectCorrectionRequest: (id: string, approverRemarks?: string) => void;
@@ -640,39 +639,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (savedLogs) setAuditLogs(JSON.parse(savedLogs));
 
         const savedLeaves = localStorage.getItem(STORAGE_KEYS.LEAVES);
-        if (savedLeaves) {
-          const parsedLeaves = JSON.parse(savedLeaves);
-          if (Array.isArray(parsedLeaves)) {
-            const cleanLeaves = parsedLeaves.filter(
-              (l: LeaveApplication) =>
-                !(
-                  (l.appliedDate || '').startsWith('2026-02') ||
-                  (l.startDate || '').startsWith('2026-02')
-                )
-            );
-            setLeaveApplications(cleanLeaves);
-            localStorage.setItem(STORAGE_KEYS.LEAVES, JSON.stringify(cleanLeaves));
-          }
-        }
+        if (savedLeaves) setLeaveApplications(JSON.parse(savedLeaves));
 
         const savedLeaveBalances = localStorage.getItem(STORAGE_KEYS.LEAVE_BALANCES);
         if (savedLeaveBalances) {
           const parsedBal = JSON.parse(savedLeaveBalances) as Record<string, LeaveBalance>;
-          const keptIds = new Set(hydratedEmployees.map((e) => e.id));
-          const filteredBal: Record<string, LeaveBalance> = {};
-          for (const [k, v] of Object.entries(parsedBal)) {
-            if (isCleanMigrated || keptIds.has(k)) {
-              filteredBal[k] = {
-                ...v,
-                casualLeaveUsed: 0,
-                sickLeaveUsed: 0,
-                earnedLeaveUsed: 0,
-                dutyLeaveUsed: 0,
-              };
+          if (isCleanMigrated) {
+            setLeaveBalances(parsedBal);
+          } else {
+            const keptIds = new Set(hydratedEmployees.map((e) => e.id));
+            const filteredBal: Record<string, LeaveBalance> = {};
+            for (const [k, v] of Object.entries(parsedBal)) {
+              if (keptIds.has(k)) filteredBal[k] = v;
             }
+            setLeaveBalances(filteredBal);
+            localStorage.setItem(STORAGE_KEYS.LEAVE_BALANCES, JSON.stringify(filteredBal));
           }
-          setLeaveBalances(filteredBal);
-          localStorage.setItem(STORAGE_KEYS.LEAVE_BALANCES, JSON.stringify(filteredBal));
         }
 
         const explicitLogout = localStorage.getItem(STORAGE_KEYS.EXPLICIT_LOGOUT) === '1';
@@ -1111,7 +1093,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
           const shouldSwitchPortalUser =
             forceUiLogin ||
-            (!explicitLogout && (!savedAuthId || savedAuthId === matched.id));
+            (!explicitLogout &&
+              (!isAuthenticatedRef.current ||
+                !currentUserRef.current.id ||
+                !savedAuthId ||
+                savedAuthId === matched.id));
 
           if (shouldSwitchPortalUser) {
             currentUserRef.current = matched;
@@ -1391,22 +1377,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               setCurrentUser(refreshedCur);
             } else if (!isAuthenticatedRef.current && firebaseUser.emailVerified) {
               let explicitLogout = false;
-              let savedAuthId = '';
               try {
                 explicitLogout = localStorage.getItem(STORAGE_KEYS.EXPLICIT_LOGOUT) === '1';
-                savedAuthId = localStorage.getItem(STORAGE_KEYS.AUTH_USER_ID) || '';
               } catch {
                 // ignore
               }
               if (!explicitLogout) {
                 const emailLow = (firebaseUser.email || '').toLowerCase();
-                const bySavedId = savedAuthId ? mapped.find((m) => m.id === savedAuthId) : undefined;
                 const byAuth =
-                  bySavedId ||
-                  (!savedAuthId
-                    ? mapped.find((m) => empUidMapRef.current[m.id] === uid) ||
-                      mapped.find((m) => m.email.toLowerCase() === emailLow)
-                    : undefined);
+                  mapped.find((m) => empUidMapRef.current[m.id] === uid) ||
+                  mapped.find((m) => m.email.toLowerCase() === emailLow);
                 if (byAuth) {
                   currentUserRef.current = byAuth;
                   isAuthenticatedRef.current = true;
@@ -1496,16 +1476,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           leaveQuery,
           (snap) => {
             if (!snap.empty || cloudInitializedRef.current) {
-              const cleanRemoteLeaves = snap.docs
-                .map((d) => d.data() as LeaveApplication)
-                .filter(
-                  (l) =>
-                    !(
-                      (l.appliedDate || '').startsWith('2026-02') ||
-                      (l.startDate || '').startsWith('2026-02')
-                    )
-                );
-              setLeaveApplications(cleanRemoteLeaves);
+              setLeaveApplications(snap.docs.map((d) => d.data() as LeaveApplication));
             }
           },
           (error) => {
@@ -2599,9 +2570,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const ingestZkMachinePunches = useCallback(
-    (incomingPunches: ZkParsedPunch[]): ZkIngestSummary => {
+    (incomingPunches: ZkParsedPunch[]) => {
       if (!incomingPunches || incomingPunches.length === 0) {
-        return { processedCount: 0, matchedCount: 0, unmappedPins: [] };
+        return {
+          processedCount: 0,
+          matchedCount: 0,
+          unmappedPins: [] as string[],
+        };
       }
 
       const currentEmps = stateRef.current.employees;
@@ -2613,17 +2588,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const findEmployeeByPin = (pin: string): Employee | undefined => {
         const cleanPin = pin.trim().toLowerCase();
         if (!cleanPin) return undefined;
-
         // 1. Exact match on attendanceMachineId
         const exactMachine = currentEmps.find(
           (e) => (e.attendanceMachineId || '').trim().toLowerCase() === cleanPin
         );
         if (exactMachine) return exactMachine;
-
         // 2. Exact match on employee ID
         const exactId = currentEmps.find((e) => e.id.trim().toLowerCase() === cleanPin);
         if (exactId) return exactId;
-
         // 3. Numeric match on attendanceMachineId (e.g. PIN "1" matches "ZK-001" or "001")
         if (/^\d+$/.test(cleanPin)) {
           const pinNum = Number(cleanPin);
@@ -2633,7 +2605,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
           if (numericMachineMatches.length === 1) return numericMachineMatches[0];
         }
-
         return undefined;
       };
 
@@ -2642,6 +2613,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       for (const rec of stateRef.current.attendanceRecords) {
         updatedRecordsMap.set(`${rec.employeeId}__${rec.date}`, rec);
       }
+
       const dirtyRecordKeys = new Set<string>();
       const unmappedPinSet = new Set<string>();
       let matchedCount = 0;
@@ -2696,7 +2668,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         let lastOutTime = existingRec?.lastOutTime;
 
         if (effectivePunchType === 'IN') {
-          if (!firstInTime || parseTimeToMinutes(punch.shortTime) < parseTimeToMinutes(firstInTime)) {
+          if (
+            !firstInTime ||
+            parseTimeToMinutes(punch.shortTime) < parseTimeToMinutes(firstInTime)
+          ) {
             firstInTime = punch.shortTime;
           }
         } else {
@@ -2715,18 +2690,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? Math.max(0, parseTimeToMinutes(lastOutTime) - parseTimeToMinutes(firstInTime))
             : 0;
 
-        const sessions: PunchSession[] = firstInTime
+        const sessions = firstInTime
           ? [
               {
-                id: existingRec?.sessions?.[0]?.id || `SES-ZK-${Date.now().toString().slice(-5)}`,
+                id:
+                  existingRec?.sessions?.[0]?.id ||
+                  `SES-ZK-${Date.now().toString().slice(-5)}`,
                 inTime: firstInTime,
                 inTimestamp: `${punch.dateStr}T${firstInTime}:00+06:00`,
                 inDeviceId: punch.serialNumber || 'ZK-F09',
                 outTime: lastOutTime,
-                outTimestamp: lastOutTime ? `${punch.dateStr}T${lastOutTime}:00+06:00` : undefined,
+                outTimestamp: lastOutTime
+                  ? `${punch.dateStr}T${lastOutTime}:00+06:00`
+                  : undefined,
                 outDeviceId: lastOutTime ? punch.serialNumber || 'ZK-F09' : undefined,
                 durationMinutes,
-                verificationStatus: 'Verified',
+                verificationStatus: 'Verified' as const,
               },
             ]
           : [];
@@ -3951,6 +3930,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  const createCalendarEventsBatch = (
+    eventsData: Omit<CalendarEvent, 'id' | 'createdAt'>[]
+  ) => {
+    if (!eventsData || eventsData.length === 0) return;
+    const nowIso = new Date().toISOString();
+    const authorName = currentUser.nameBn || currentUser.name;
+    const createdEvents: CalendarEvent[] = eventsData.map((eventData, idx) => ({
+      ...eventData,
+      id: `CAL-${Date.now().toString().slice(-6)}-${idx + 1}-${Math.random().toString(36).slice(2, 5)}`,
+      endDate:
+        eventData.endDate && eventData.endDate >= eventData.startDate
+          ? eventData.endDate
+          : eventData.startDate,
+      createdBy: authorName,
+      createdAt: nowIso,
+    }));
+
+    const updatedList = [...calendarEvents, ...createdEvents].sort((a, b) =>
+      a.startDate.localeCompare(b.startDate)
+    );
+    setCalendarEvents(updatedList);
+    syncCalendarSpecialDaysToAttendance(updatedList);
+
+    const uid = activeUid || auth.currentUser?.uid || '';
+    createdEvents.forEach((ev) => {
+      runCloudWrite(
+        () => syncCalendarEventToFirestore(ev, uid),
+        `calendarEvents/${ev.id}`
+      );
+    });
+
+    logAudit(
+      'CREATE_CALENDAR_EVENT_BATCH',
+      'System',
+      `বার্ষিক ক্যালেন্ডারে একসাথে ${createdEvents.length} টি ইভেন্ট/ছুটি যুক্ত হয়েছে`
+    );
+  };
+
   const updateCalendarEvent = (id: string, updates: Partial<CalendarEvent>) => {
     let editedEvent: CalendarEvent | undefined;
     const updatedList = calendarEvents
@@ -4023,35 +4040,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
-  const computeUsedLeaveDaysForEmployee = (employeeId: string, yearNum: number) => {
-    const yearPrefix = String(yearNum);
-    const approvedApps = leaveApplications.filter(
-      (app) =>
-        app.employeeId === employeeId &&
-        app.status === 'Approved' &&
-        (app.startDate || '').startsWith(yearPrefix)
-    );
-    let casualLeaveUsed = 0;
-    let sickLeaveUsed = 0;
-    let earnedLeaveUsed = 0;
-    let dutyLeaveUsed = 0;
-
-    for (const app of approvedApps) {
-      const days = Math.max(0, Number(app.totalDays) || 0);
-      if (app.leaveType.includes('Casual')) casualLeaveUsed += days;
-      else if (app.leaveType.includes('Sick')) sickLeaveUsed += days;
-      else if (app.leaveType.includes('Earned')) earnedLeaveUsed += days;
-      else if (app.leaveType.includes('Duty')) dutyLeaveUsed += days;
-    }
-
-    return { casualLeaveUsed, sickLeaveUsed, earnedLeaveUsed, dutyLeaveUsed };
-  };
-
   const getEmployeeLeaveBalance = (employeeId: string): LeaveBalance => {
     const existing = leaveBalances[employeeId];
     const lp = institutionalLeavePolicy;
-    const used = computeUsedLeaveDaysForEmployee(employeeId, lp.year);
-
     if (existing) {
       return {
         ...existing,
@@ -4061,32 +4052,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : lp.casualLeaveEnabled
           ? lp.casualLeaveDefault
           : 0,
-        casualLeaveUsed: used.casualLeaveUsed,
         sickLeaveTotal: existing.isCustomQuota
           ? existing.sickLeaveTotal
           : lp.sickLeaveEnabled
           ? lp.sickLeaveDefault
           : 0,
-        sickLeaveUsed: used.sickLeaveUsed,
         earnedLeaveTotal: existing.isCustomQuota
           ? existing.earnedLeaveTotal
           : lp.earnedLeaveEnabled
           ? lp.earnedLeaveDefault
           : 0,
-        earnedLeaveUsed: used.earnedLeaveUsed,
-        dutyLeaveUsed: used.dutyLeaveUsed,
       };
     }
     return {
       employeeId,
       year: lp.year,
       casualLeaveTotal: lp.casualLeaveEnabled ? lp.casualLeaveDefault : 0,
-      casualLeaveUsed: used.casualLeaveUsed,
+      casualLeaveUsed: 0,
       sickLeaveTotal: lp.sickLeaveEnabled ? lp.sickLeaveDefault : 0,
-      sickLeaveUsed: used.sickLeaveUsed,
+      sickLeaveUsed: 0,
       earnedLeaveTotal: lp.earnedLeaveEnabled ? lp.earnedLeaveDefault : 0,
-      earnedLeaveUsed: used.earnedLeaveUsed,
-      dutyLeaveUsed: used.dutyLeaveUsed,
+      earnedLeaveUsed: 0,
+      dutyLeaveUsed: 0,
       isCustomQuota: false,
     };
   };
@@ -4111,17 +4098,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const nextBalances: Record<string, LeaveBalance> = { ...leaveBalances };
       const updatedBalancesList: LeaveBalance[] = [];
       employees.forEach((emp) => {
-        const used = computeUsedLeaveDaysForEmployee(emp.id, nextPolicy.year);
         const cur = nextBalances[emp.id] || {
           employeeId: emp.id,
           year: nextPolicy.year,
           casualLeaveTotal: nextPolicy.casualLeaveDefault,
-          casualLeaveUsed: used.casualLeaveUsed,
+          casualLeaveUsed: 0,
           sickLeaveTotal: nextPolicy.sickLeaveDefault,
-          sickLeaveUsed: used.sickLeaveUsed,
+          sickLeaveUsed: 0,
           earnedLeaveTotal: nextPolicy.earnedLeaveDefault,
-          earnedLeaveUsed: used.earnedLeaveUsed,
-          dutyLeaveUsed: used.dutyLeaveUsed,
+          earnedLeaveUsed: 0,
+          dutyLeaveUsed: 0,
           isCustomQuota: false,
         };
 
@@ -4130,12 +4116,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ...cur,
             year: nextPolicy.year,
             casualLeaveTotal: nextPolicy.casualLeaveEnabled ? nextPolicy.casualLeaveDefault : 0,
-            casualLeaveUsed: used.casualLeaveUsed,
             sickLeaveTotal: nextPolicy.sickLeaveEnabled ? nextPolicy.sickLeaveDefault : 0,
-            sickLeaveUsed: used.sickLeaveUsed,
             earnedLeaveTotal: nextPolicy.earnedLeaveEnabled ? nextPolicy.earnedLeaveDefault : 0,
-            earnedLeaveUsed: used.earnedLeaveUsed,
-            dutyLeaveUsed: used.dutyLeaveUsed,
             isCustomQuota: applyMode === 'all' ? false : cur.isCustomQuota,
           };
           nextBalances[emp.id] = updatedBal;
@@ -4173,17 +4155,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   ) => {
     const lp = institutionalLeavePolicy;
-    const used = computeUsedLeaveDaysForEmployee(employeeId, lp.year);
     const existing = leaveBalances[employeeId] || {
       employeeId,
       year: lp.year,
       casualLeaveTotal: lp.casualLeaveEnabled ? lp.casualLeaveDefault : 0,
-      casualLeaveUsed: used.casualLeaveUsed,
+      casualLeaveUsed: 0,
       sickLeaveTotal: lp.sickLeaveEnabled ? lp.sickLeaveDefault : 0,
-      sickLeaveUsed: used.sickLeaveUsed,
+      sickLeaveUsed: 0,
       earnedLeaveTotal: lp.earnedLeaveEnabled ? lp.earnedLeaveDefault : 0,
-      earnedLeaveUsed: used.earnedLeaveUsed,
-      dutyLeaveUsed: used.dutyLeaveUsed,
+      earnedLeaveUsed: 0,
+      dutyLeaveUsed: 0,
       isCustomQuota: false,
     };
 
@@ -4193,23 +4174,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ? {
           ...existing,
           casualLeaveTotal: lp.casualLeaveEnabled ? lp.casualLeaveDefault : 0,
-          casualLeaveUsed: used.casualLeaveUsed,
           sickLeaveTotal: lp.sickLeaveEnabled ? lp.sickLeaveDefault : 0,
-          sickLeaveUsed: used.sickLeaveUsed,
           earnedLeaveTotal: lp.earnedLeaveEnabled ? lp.earnedLeaveDefault : 0,
-          earnedLeaveUsed: used.earnedLeaveUsed,
-          dutyLeaveUsed: used.dutyLeaveUsed,
           isCustomQuota: false,
         }
       : {
           ...existing,
           casualLeaveTotal: updates.casualLeaveTotal ?? existing.casualLeaveTotal,
-          casualLeaveUsed: used.casualLeaveUsed,
           sickLeaveTotal: updates.sickLeaveTotal ?? existing.sickLeaveTotal,
-          sickLeaveUsed: used.sickLeaveUsed,
           earnedLeaveTotal: updates.earnedLeaveTotal ?? existing.earnedLeaveTotal,
-          earnedLeaveUsed: used.earnedLeaveUsed,
-          dutyLeaveUsed: used.dutyLeaveUsed,
           isCustomQuota: true,
         };
 
@@ -4308,12 +4281,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         updateInstitutionalLeavePolicy,
         updateEmployeeLeaveQuota,
         createCalendarEvent,
+        createCalendarEventsBatch,
         updateCalendarEvent,
         deleteCalendarEvent,
         recordManualPunch,
+        ingestZkMachinePunches,
         simulateMachineSync,
         importMachineLogsCSV,
-        ingestZkMachinePunches,
         submitCorrectionRequest,
         approveCorrectionRequest,
         rejectCorrectionRequest,

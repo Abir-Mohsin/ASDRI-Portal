@@ -40,7 +40,6 @@ import {
   Users,
   RotateCcw,
   FileText,
-  Building2,
   ArrowRight,
   Check,
   AlertTriangle,
@@ -61,6 +60,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
     updatePolicy,
     calendarEvents,
     createCalendarEvent,
+    createCalendarEventsBatch,
     updateCalendarEvent,
     deleteCalendarEvent,
     meetings,
@@ -122,6 +122,9 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
   const [evTimeLabel, setEvTimeLabel] = useState<string>('');
   const [evLocation, setEvLocation] = useState<string>('');
   const [evDescription, setEvDescription] = useState<string>('');
+  const [evBatchRows, setEvBatchRows] = useState<
+    Array<{ title: string; startDate: string; endDate: string }>
+  >([{ title: '', startDate: todayStr, endDate: todayStr }]);
 
   // Meeting-specific fields inside Add/Edit Modal
   const [evDepartment, setEvDepartment] = useState<string>('সকল বিভাগ');
@@ -311,6 +314,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
     setEvCategory(defaultCategory);
     setEvStartDate(target);
     setEvEndDate(target);
+    setEvBatchRows([{ title: '', startDate: target, endDate: target }]);
     setEvTimeLabel('');
     setEvLocation(defaultCategory === 'Meeting' ? 'ইনস্টিটিউট কনফারেন্স রুম' : '');
     setEvDescription('');
@@ -363,10 +367,10 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
 
   const handleSaveEvent = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!evTitle.trim() || !evStartDate) return;
     const normalizedEnd = evEndDate && evEndDate >= evStartDate ? evEndDate : evStartDate;
 
     if (evCategory === 'Meeting') {
+      if (!evTitle.trim() || !evStartDate) return;
       const agendaArr = evAgendaText
         .split('\n')
         .map((line) => line.trim())
@@ -428,6 +432,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
     }
 
     if (editingEventId) {
+      if (!evTitle.trim() || !evStartDate) return;
       updateCalendarEvent(editingEventId, {
         title: evTitle.trim(),
         category: evCategory,
@@ -438,15 +443,24 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
         description: evDescription.trim() || undefined,
       });
     } else {
-      createCalendarEvent({
-        title: evTitle.trim(),
+      const validRows = evBatchRows.filter((r) => r.title.trim().length > 0 && r.startDate);
+      if (validRows.length === 0) return;
+
+      const batchPayload = validRows.map((r) => ({
+        title: r.title.trim(),
         category: evCategory,
-        startDate: evStartDate,
-        endDate: normalizedEnd,
+        startDate: r.startDate,
+        endDate: r.endDate && r.endDate >= r.startDate ? r.endDate : r.startDate,
         timeLabel: evTimeLabel.trim() || undefined,
         location: evLocation.trim() || undefined,
         description: evDescription.trim() || undefined,
-      });
+      }));
+
+      if (batchPayload.length === 1) {
+        createCalendarEvent(batchPayload[0]);
+      } else {
+        createCalendarEventsBatch(batchPayload);
+      }
     }
     setShowEventModal(false);
   };
@@ -538,31 +552,26 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
   });
 
   return (
-    <div className="space-y-4 sm:space-y-6 font-serif">
+    <div className="space-y-4 font-serif">
       {/* Header & Today Tri-Date Banner */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-2xs space-y-4 sm:space-y-5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] sm:text-xs text-emerald-800 font-semibold">
-              <CalendarDays className="w-4 h-4 shrink-0" />
-              <span>{institutionalLeavePolicy.academicYearLabel}</span>
-              <span aria-hidden="true">·</span>
-              <span>ইংরেজি, বাংলা ও হিজরি সমন্বিত পঞ্জিকা</span>
-            </div>
-            <h1 className="text-lg sm:text-2xl font-bold text-slate-900 mt-1">
-              বাৎসরিক একাডেমিক ও ছুটি ক্যালেন্ডার ({toBnDigits(selectedYear)})
+      <div className="bg-white rounded-xl border border-slate-200 px-4 sm:px-5 py-3.5 shadow-2xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <CalendarDays className="w-5 h-5 text-emerald-900 shrink-0" />
+            <h1 className="text-lg sm:text-xl font-bold text-slate-900">
+              বার্ষিক ক্যালেন্ডার ({toBnDigits(selectedYear)})
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              প্রতিষ্ঠানের সকল সরকারি ও প্রাতিষ্ঠানিক ছুটি, পরীক্ষা, একাডেমিক কার্যক্রম ও বাৎসরিক ছুটির কোটা।
-            </p>
+            <span className="hidden sm:inline-block text-xs text-slate-400">·</span>
+            <span className="hidden sm:inline-block text-xs font-semibold text-emerald-800">
+              {institutionalLeavePolicy.academicYearLabel}
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Year Selector */}
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs font-bold font-mono text-slate-900"
+              className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 text-xs font-bold font-mono text-slate-900"
             >
               {[2025, 2026, 2027, 2028].map((yr) => (
                 <option key={yr} value={yr}>
@@ -574,16 +583,16 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
             <button
               type="button"
               onClick={handleExportExcel}
-              className="px-3 py-2 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+              className="px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Excel ডাউনলোড</span>
+              <span>Excel</span>
             </button>
 
             <button
               type="button"
               onClick={() => window.print()}
-              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>প্রিন্ট</span>
@@ -593,121 +602,119 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               <button
                 type="button"
                 onClick={() => openAddModal()}
-                className="w-full sm:w-auto justify-center px-4 py-2 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                className="px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
               >
-                <PlusCircle className="w-4 h-4 text-amber-300" />
-                <span>{isAdmin ? 'নতুন ছুটি / মিটিং / ইভেন্ট যোগ' : 'নতুন মিটিং নির্ধারণ'}</span>
+                <PlusCircle className="w-3.5 h-3.5 text-amber-300" />
+                <span>{isAdmin ? 'নতুন যোগ' : 'নতুন মিটিং'}</span>
               </button>
             )}
           </div>
         </div>
 
         {/* Today's Tri-Date Highlight Strip */}
-        <div className="pt-4 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-slate-700">
-            <span className="font-bold text-emerald-900">আজকের তারিখ:</span>
+        <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-slate-700">
+            <span className="font-bold text-emerald-900">আজ:</span>
             <span className="font-semibold text-slate-900">{todayGregorianBn}</span>
-            <span aria-hidden="true" className="text-slate-300">|</span>
+            <span aria-hidden="true" className="text-slate-300">·</span>
             <span className="font-semibold text-amber-900">{todayBn.formattedFull}</span>
-            <span aria-hidden="true" className="text-slate-300">|</span>
+            <span aria-hidden="true" className="text-slate-300">·</span>
             <span className="font-semibold text-sky-900">{todayHijri.formattedFull}</span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`px-2.5 py-1 rounded-md border text-[11px] font-semibold ${
-                todayStatus.isAnyHoliday
-                  ? 'bg-rose-50 text-rose-800 border-rose-200'
-                  : 'bg-emerald-50 text-emerald-900 border-emerald-200'
-              }`}
-            >
-              {todayStatus.isAnyHoliday
-                ? `আজ ছুটি: ${todayStatus.holidayTitle || 'ছুটির দিন'}`
-                : todayStatus.isSpecialWorkingDay
-                ? 'বিশেষ কর্মদিবস (অফিস খোলা)'
-                : 'আজ নিয়মিত কর্মদিবস'}
-            </span>
-          </div>
+          <span
+            className={`px-2 py-0.5 rounded border text-[11px] font-semibold w-fit ${
+              todayStatus.isAnyHoliday
+                ? 'bg-rose-50 text-rose-800 border-rose-200'
+                : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+            }`}
+          >
+            {todayStatus.isAnyHoliday
+              ? `আজ ছুটি: ${todayStatus.holidayTitle || 'ছুটির দিন'}`
+              : todayStatus.isSpecialWorkingDay
+              ? 'বিশেষ কর্মদিবস'
+              : 'নিয়মিত কর্মদিবস'}
+          </span>
         </div>
       </div>
 
       {/* Navigation Tabs & Institutional Leave Quick Strip */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="flex items-center gap-1 p-1 bg-slate-200/70 rounded-xl w-full sm:w-fit overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={() => setActiveTab('month')}
-            className={`px-3 sm:px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'month' ? 'bg-white text-emerald-950 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            মাসিক ক্যালেন্ডার
+            মাসিক
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('year')}
-            className={`px-3 sm:px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'year' ? 'bg-white text-emerald-950 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            পুরো ১২ মাস
+            বার্ষিক ১২ মাস
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('list')}
-            className={`px-3 sm:px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'list' ? 'bg-white text-emerald-950 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            কার্যক্রম তালিকা ({toBnDigits(yearEvents.length)})
+            তালিকা ({toBnDigits(yearEvents.length)})
           </button>
           {isAdmin && (
             <button
               type="button"
               onClick={() => setActiveTab('leave-policy')}
-              className={`px-3 sm:px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                 activeTab === 'leave-policy'
                   ? 'bg-emerald-900 text-white shadow-2xs'
                   : 'text-emerald-900 hover:bg-white/70'
               }`}
             >
               <Sliders className="w-3.5 h-3.5" />
-              <span>ছুটির নীতিমালা ও কোটা এডিট</span>
+              <span>ছুটির কোটা</span>
             </button>
           )}
         </div>
 
-        {/* Institutional Leave Quota Strip (Visible to All) */}
-        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 bg-white px-4 py-2 rounded-xl border border-slate-200">
-          <span className="font-bold text-slate-800">প্রতিষ্ঠানের বার্ষিক ছুটি:</span>
+        {/* Institutional Leave Quota Strip */}
+        <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600 bg-white px-3.5 py-1.5 rounded-xl border border-slate-200">
+          <span className="font-bold text-slate-800">বার্ষিক ছুটি:</span>
           <span>
-            নৈমিত্তিক (CL):{' '}
+            CL:{' '}
             <strong className="font-mono tabular-nums text-slate-900">
               {institutionalLeavePolicy.casualLeaveEnabled
-                ? `${toBnDigits(institutionalLeavePolicy.casualLeaveDefault)} দিন`
+                ? toBnDigits(institutionalLeavePolicy.casualLeaveDefault)
                 : 'বন্ধ'}
             </strong>
           </span>
           <span aria-hidden="true">·</span>
           <span>
-            সিক/চিকিৎসা (SL):{' '}
+            SL:{' '}
             <strong className="font-mono tabular-nums text-slate-900">
               {institutionalLeavePolicy.sickLeaveEnabled
-                ? `${toBnDigits(institutionalLeavePolicy.sickLeaveDefault)} দিন`
+                ? toBnDigits(institutionalLeavePolicy.sickLeaveDefault)
                 : 'বন্ধ'}
             </strong>
           </span>
           <span aria-hidden="true">·</span>
           <span>
-            অর্জিত ছুটি (EL):{' '}
+            EL:{' '}
             <strong
               className={`font-mono tabular-nums ${
                 institutionalLeavePolicy.earnedLeaveEnabled ? 'text-emerald-800' : 'text-rose-700'
               }`}
             >
               {institutionalLeavePolicy.earnedLeaveEnabled
-                ? `${toBnDigits(institutionalLeavePolicy.earnedLeaveDefault)} দিন`
-                : 'চালু নেই'}
+                ? toBnDigits(institutionalLeavePolicy.earnedLeaveDefault)
+                : 'বন্ধ'}
             </strong>
           </span>
         </div>
@@ -715,12 +722,12 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
 
       {/* TAB 1: MONTHLY GRID VIEW */}
       {activeTab === 'month' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 items-start">
           {/* Left 8 cols: Monthly Grid */}
           <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
             {/* Month Controls */}
-            <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 px-3 sm:px-5 py-3 sm:py-4 border-b border-slate-200 bg-slate-50/70">
-              <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-3 border-b border-slate-200 bg-slate-50/70">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={goPrevMonth}
@@ -728,7 +735,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <h2 className="text-sm sm:text-base font-bold text-slate-900 min-w-[125px] sm:min-w-[155px] text-center">
+                <h2 className="text-sm sm:text-base font-bold text-slate-900 min-w-[125px] sm:min-w-[145px] text-center">
                   {GREGORIAN_MONTHS_BN[selectedMonth]} {toBnDigits(selectedYear)}
                 </h2>
                 <button
@@ -744,7 +751,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                 <select
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                  className="px-2 sm:px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800"
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800"
                 >
                   {GREGORIAN_MONTHS_BN.map((mName, idx) => (
                     <option key={mName} value={idx}>
@@ -759,9 +766,9 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     setSelectedMonth(todayMonth - 1);
                     setSelectedDate(todayStr);
                   }}
-                  className="px-2.5 sm:px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-semibold cursor-pointer whitespace-nowrap"
+                  className="px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-semibold cursor-pointer whitespace-nowrap"
                 >
-                  আজকের মাস
+                  আজ
                 </button>
               </div>
             </div>
@@ -774,7 +781,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                 return (
                   <div
                     key={wd}
-                    className={`py-2 sm:py-2.5 border-r last:border-r-0 border-slate-200 ${
+                    className={`py-2 border-r last:border-r-0 border-slate-200 ${
                       isWeeklyOff ? 'text-rose-700 bg-rose-50/40' : ''
                     }`}
                   >
@@ -791,7 +798,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                   return (
                     <div
                       key={`empty-${index}`}
-                      className="min-h-[60px] sm:min-h-[108px] border-r border-b border-slate-100 bg-slate-50/40"
+                      className="min-h-[58px] sm:min-h-[100px] border-r border-b border-slate-100 bg-slate-50/40"
                     />
                   );
                 }
@@ -808,7 +815,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     key={dStr}
                     type="button"
                     onClick={() => setSelectedDate(dStr)}
-                    className={`min-h-[60px] sm:min-h-[108px] p-1 sm:p-2 border-r border-b border-slate-200/80 text-left flex flex-col justify-between transition-colors cursor-pointer ${
+                    className={`min-h-[58px] sm:min-h-[100px] p-1 sm:p-2 border-r border-b border-slate-200/80 text-left flex flex-col justify-between transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-emerald-50/90 ring-2 ring-inset ring-emerald-700'
                         : opStatus.isAnyHoliday
@@ -896,44 +903,37 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
             </div>
 
             {/* Category Legend */}
-            <div className="px-3 sm:px-5 py-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1.5 text-[11px] text-slate-600">
-              <span className="font-bold text-slate-800">নির্দেশিকা:</span>
-              <span className="inline-flex items-center gap-1.5">
+            <div className="px-3 sm:px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+              <span className="inline-flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-xs bg-rose-200 border border-rose-400" /> ছুটি
               </span>
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-xs bg-emerald-200 border border-emerald-400" /> একাডেমিক
               </span>
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-xs bg-amber-200 border border-amber-400" /> পরীক্ষা
               </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-xs bg-sky-200 border border-sky-400" /> ইভেন্ট ও সেমিনার
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-xs bg-sky-200 border border-sky-400" /> ইভেন্ট
               </span>
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-xs bg-indigo-200 border border-indigo-400" /> বিশেষ কর্মদিবস
               </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-xs bg-purple-200 border border-purple-400" /> মিটিং / সভা
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-xs bg-purple-200 border border-purple-400" /> মিটিং
               </span>
             </div>
           </div>
 
           {/* Right 4 cols: Selected Date Inspector */}
-          <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 shadow-2xs p-4 sm:p-5 space-y-4">
-            <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-100">
+          <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 shadow-2xs p-4 space-y-3.5">
+            <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
               <div>
-                <span className="text-[11px] font-semibold text-emerald-800 block">
-                  নির্বাচিত দিনের বিবরণ
-                </span>
-                <h3 className="text-base font-bold text-slate-900 mt-0.5">{selectedGregorianBn}</h3>
-                <div className="text-xs text-slate-600 mt-1 space-y-0.5">
-                  <div>
-                    <strong className="text-amber-900">বাংলা:</strong> {selectedBn.formattedFull}
-                  </div>
-                  <div>
-                    <strong className="text-sky-900">হিজরি:</strong> {selectedHijri.formattedFull}
-                  </div>
+                <h3 className="text-base font-bold text-slate-900">{selectedGregorianBn}</h3>
+                <div className="text-xs text-slate-600 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  <span className="text-amber-900 font-medium">{selectedBn.formattedFull}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="text-sky-900 font-medium">{selectedHijri.formattedFull}</span>
                 </div>
               </div>
 
@@ -941,16 +941,16 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                 <button
                   type="button"
                   onClick={() => openAddModal(selectedDate)}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-semibold cursor-pointer shrink-0 flex items-center gap-1"
+                  className="px-2.5 py-1.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-semibold cursor-pointer shrink-0 flex items-center gap-1"
                 >
                   <PlusCircle className="w-3.5 h-3.5 text-amber-300" />
-                  <span>যোগ করুন</span>
+                  <span>যোগ</span>
                 </button>
               )}
             </div>
 
             <div
-              className={`p-3 rounded-lg border text-xs font-semibold ${
+              className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
                 selectedStatus.isAnyHoliday
                   ? 'bg-rose-50 border-rose-200 text-rose-900'
                   : selectedStatus.isSpecialWorkingDay
@@ -959,32 +959,32 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               }`}
             >
               {selectedStatus.isAnyHoliday
-                ? `ছুটির দিন: ${selectedStatus.holidayTitle || 'প্রতিষ্ঠান ছুটি'}`
+                ? `ছুটি: ${selectedStatus.holidayTitle || 'প্রতিষ্ঠান ছুটি'}`
                 : selectedStatus.isSpecialWorkingDay
-                ? 'বিশেষ কর্মদিবস (উপস্থিতি চালু থাকবে)'
-                : 'নিয়মিত অফিস ও একাডেমিক কর্মদিবস'}
+                ? 'বিশেষ কর্মদিবস'
+                : 'নিয়মিত কর্মদিবস'}
             </div>
 
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               <div className="text-xs font-bold text-slate-800">
-                এই দিনের নির্ধারিত কার্যক্রম ({toBnDigits(selectedStatus.dayEvents.length)} টি)
+                কার্যক্রম ({toBnDigits(selectedStatus.dayEvents.length)})
               </div>
 
               {selectedStatus.dayEvents.length === 0 ? (
-                <div className="p-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 text-center text-xs text-slate-500 space-y-2">
-                  <p>এই তারিখে কোনো বিশেষ ছুটি, পরীক্ষা, মিটিং বা ইভেন্ট যুক্ত নেই।</p>
+                <div className="p-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 text-center text-xs text-slate-500 space-y-1.5">
+                  <p>কোনো কার্যক্রম নেই।</p>
                   {canScheduleMeeting && (
                     <button
                       type="button"
                       onClick={() => openAddModal(selectedDate)}
                       className="text-emerald-800 font-semibold hover:underline cursor-pointer"
                     >
-                      + এই তারিখে নতুন কার্যক্রম বা মিটিং যুক্ত করুন
+                      + নতুন যুক্ত করুন
                     </button>
                   )}
                 </div>
               ) : (
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   {selectedStatus.dayEvents.map((ev) => {
                     const linkedMtg = ev.linkedMeetingId
                       ? meetingsById.get(ev.linkedMeetingId)
@@ -996,21 +996,20 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     return (
                       <div
                         key={ev.id}
-                        className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2 text-xs"
+                        className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 space-y-1.5 text-xs"
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                             <span
-                              className={`px-2 py-0.5 rounded border text-[10px] font-bold ${getCategoryBadgeStyle(
+                              className={`px-2 py-0.5 rounded border font-bold ${getCategoryBadgeStyle(
                                 ev.category
                               )}`}
                             >
                               {getCategoryLabelBn(ev.category)}
                             </span>
                             {(ev.department || linkedMtg?.department) && (
-                              <span className="px-2 py-0.5 rounded border border-slate-200 bg-white text-[10px] font-semibold text-slate-700 inline-flex items-center gap-1">
-                                <Building2 className="w-2.5 h-2.5 text-slate-500" />
-                                {linkedMtg?.department || ev.department}
+                              <span className="font-semibold text-slate-600">
+                                · {linkedMtg?.department || ev.department}
                               </span>
                             )}
                           </div>
@@ -1039,13 +1038,18 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                         <div className="font-bold text-slate-900 text-sm">{ev.title}</div>
 
                         {ev.startDate !== ev.endDate && (
-                          <div className="text-[11px] font-mono text-slate-600">
-                            মেয়াদ: {ev.startDate} থেকে {ev.endDate}
+                          <div className="text-[11px] font-mono text-slate-600 flex items-center gap-1.5">
+                            <span>
+                              {ev.startDate} → {ev.endDate}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 text-[10px] font-bold">
+                              {toBnDigits(enumerateDateRange(ev.startDate, ev.endDate).length)} দিন
+                            </span>
                           </div>
                         )}
 
                         {(ev.timeLabel || ev.location) && (
-                          <div className="flex flex-wrap gap-3 text-[11px] text-slate-600">
+                          <div className="flex flex-wrap gap-2.5 text-[11px] text-slate-600">
                             {ev.timeLabel && (
                               <span className="inline-flex items-center gap-1">
                                 <Clock className="w-3 h-3 text-slate-400" /> {ev.timeLabel}
@@ -1060,8 +1064,8 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                         )}
 
                         {ev.category === 'Meeting' && linkedMtg && (
-                          <div className="pt-1.5 border-t border-slate-200/70 space-y-2">
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <div className="pt-1.5 border-t border-slate-200/70 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2 text-[11px]">
                               <span className="text-slate-600 inline-flex items-center gap-1">
                                 <Users className="w-3 h-3 text-purple-700" />
                                 আমন্ত্রিত:{' '}
@@ -1069,37 +1073,18 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                                   {toBnDigits(
                                     linkedMtg.invitedEmployeeIds?.length ||
                                       linkedMtg.participants.length
-                                  )}{' '}
-                                  জন
+                                  )}
                                 </strong>
                               </span>
 
                               <span
-                                className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
-                                  hasMinutesAdded
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                                className={`text-[10px] font-bold ${
+                                  hasMinutesAdded ? 'text-emerald-800' : 'text-amber-800'
                                 }`}
                               >
-                                {hasMinutesAdded ? 'মিনিটস সম্পন্ন' : 'মিনিটস বাকি'}
+                                {hasMinutesAdded ? '• মিনিটস সম্পন্ন' : '• মিনিটস বাকি'}
                               </span>
                             </div>
-
-                            {linkedMtg.agenda.length > 0 && (
-                              <div className="text-[11px] text-slate-600 bg-white rounded-md border border-slate-200/80 p-2 space-y-0.5">
-                                <div className="font-bold text-slate-700 text-[10px]">আলোচ্যসূচি (Agenda):</div>
-                                {linkedMtg.agenda.slice(0, 3).map((item, idx) => (
-                                  <div key={idx} className="truncate">
-                                    • {item}
-                                  </div>
-                                ))}
-                                {linkedMtg.agenda.length > 3 && (
-                                  <div className="text-[10px] text-slate-400">
-                                    +{toBnDigits(linkedMtg.agenda.length - 3)} আরও বিষয়
-                                  </div>
-                                )}
-                              </div>
-                            )}
 
                             <button
                               type="button"
@@ -1113,10 +1098,10 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                               <FileText className="w-3.5 h-3.5" />
                               <span>
                                 {hasMinutesAdded
-                                  ? 'মিটিং মিনিটস দেখুন'
+                                  ? 'মিনিটস দেখুন'
                                   : canScheduleMeeting
-                                  ? 'মিটিং মিনিটস লিখুন / যোগ করুন'
-                                  : 'সভার বিবরণ দেখুন'}
+                                  ? 'মিনিটস লিখুন'
+                                  : 'বিবরণ দেখুন'}
                               </span>
                               <ArrowRight className="w-3 h-3" />
                             </button>
@@ -1124,7 +1109,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                         )}
 
                         {ev.description && ev.category !== 'Meeting' && (
-                          <p className="text-[11px] text-slate-600 leading-relaxed pt-0.5">
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
                             {ev.description}
                           </p>
                         )}
@@ -1140,43 +1125,43 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
 
       {/* TAB 2: FULL 12-MONTH YEAR OVERVIEW */}
       {activeTab === 'year' && (
-        <div className="space-y-5">
+        <div className="space-y-4">
           {/* Annual Stats Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-            <div className="bg-white p-4 rounded-xl border border-slate-200">
-              <div className="text-xs text-slate-500">মোট ঘোষিত ছুটির দিন</div>
-              <div className="text-2xl font-bold font-mono tabular-nums text-rose-700 mt-1">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200">
+              <div className="text-xs text-slate-500">ঘোষিত ছুটি</div>
+              <div className="text-xl font-bold font-mono tabular-nums text-rose-700 mt-0.5">
                 {toBnDigits(annualStats.holidayDays)} দিন
               </div>
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200">
-              <div className="text-xs text-slate-500">একাডেমিক কার্যক্রম</div>
-              <div className="text-2xl font-bold font-mono tabular-nums text-emerald-800 mt-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200">
+              <div className="text-xs text-slate-500">একাডেমিক</div>
+              <div className="text-xl font-bold font-mono tabular-nums text-emerald-800 mt-0.5">
                 {toBnDigits(annualStats.academicCount)} টি
               </div>
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200">
-              <div className="text-xs text-slate-500">পরীক্ষা ও মূল্যায়ন</div>
-              <div className="text-2xl font-bold font-mono tabular-nums text-amber-800 mt-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200">
+              <div className="text-xs text-slate-500">পরীক্ষা</div>
+              <div className="text-xl font-bold font-mono tabular-nums text-amber-800 mt-0.5">
                 {toBnDigits(annualStats.examCount)} টি
               </div>
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200">
-              <div className="text-xs text-slate-500">ইভেন্ট ও সেমিনার</div>
-              <div className="text-2xl font-bold font-mono tabular-nums text-sky-800 mt-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200">
+              <div className="text-xs text-slate-500">ইভেন্ট</div>
+              <div className="text-xl font-bold font-mono tabular-nums text-sky-800 mt-0.5">
                 {toBnDigits(annualStats.eventCount)} টি
               </div>
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200">
-              <div className="text-xs text-slate-500">নির্ধারিত মিটিং / সভা</div>
-              <div className="text-2xl font-bold font-mono tabular-nums text-purple-800 mt-1">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200">
+              <div className="text-xs text-slate-500">মিটিং</div>
+              <div className="text-xl font-bold font-mono tabular-nums text-purple-800 mt-0.5">
                 {toBnDigits(annualStats.meetingCount)} টি
               </div>
             </div>
           </div>
 
           {/* 12 Months Mini Grids */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {GREGORIAN_MONTHS_BN.map((mName, mIdx) => {
               const firstDay = new Date(selectedYear, mIdx, 1).getDay();
               const totalDays = new Date(selectedYear, mIdx + 1, 0).getDate();
@@ -1188,7 +1173,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               return (
                 <div
                   key={mName}
-                  className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3"
+                  className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs space-y-2.5"
                 >
                   <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                     <div>
@@ -1207,7 +1192,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                       }}
                       className="text-[11px] font-semibold text-emerald-800 hover:underline cursor-pointer"
                     >
-                      বিস্তারিত →
+                      দেখুন →
                     </button>
                   </div>
 
@@ -1275,25 +1260,25 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
 
       {/* TAB 3: EVENT SCHEDULE LIST */}
       {activeTab === 'list' && (
-        <div className="space-y-4">
-          <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="space-y-3">
+          <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-2.5">
             <div className="flex flex-wrap items-center gap-1.5">
               {(
                 [
-                  { id: 'ALL', label: 'সব কার্যক্রম' },
+                  { id: 'ALL', label: 'সব' },
                   { id: 'Holiday', label: 'ছুটি' },
                   { id: 'Academic', label: 'একাডেমিক' },
                   { id: 'Exam', label: 'পরীক্ষা' },
                   { id: 'Event', label: 'ইভেন্ট' },
                   { id: 'Special_Working_Day', label: 'বিশেষ কর্মদিবস' },
-                  { id: 'Meeting', label: 'মিটিং / সভা' },
+                  { id: 'Meeting', label: 'মিটিং' },
                 ] as const
               ).map((cat) => (
                 <button
                   key={cat.id}
                   type="button"
                   onClick={() => setListCategoryFilter(cat.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border ${
                     listCategoryFilter === cat.id
                       ? 'bg-emerald-900 text-white border-emerald-900'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -1308,7 +1293,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               <select
                 value={listMonthFilter}
                 onChange={(e) => setListMonthFilter(e.target.value)}
-                className="px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs font-semibold"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 text-xs font-semibold"
               >
                 <option value="ALL">সকল মাস</option>
                 {GREGORIAN_MONTHS_BN.map((mName, idx) => (
@@ -1324,8 +1309,8 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="শিরোনাম বা বিবরণ খুঁজুন..."
-                  className="pl-8 pr-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs"
+                  placeholder="খুঁজুন..."
+                  className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 text-xs"
                 />
               </div>
             </div>
@@ -1335,8 +1320,8 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
             {/* Mobile Card View */}
             <div className="md:hidden divide-y divide-slate-100">
               {filteredListEvents.length === 0 ? (
-                <div className="py-10 px-4 text-center text-xs text-slate-500">
-                  নির্বাচিত বছরে কোনো ছুটি, পরীক্ষা, মিটিং বা একাডেমিক কার্যক্রম এখনো যোগ করা হয়নি।
+                <div className="py-8 px-4 text-center text-xs text-slate-500">
+                  কোনো কার্যক্রম পাওয়া যায়নি।
                 </div>
               ) : (
                 filteredListEvents.map((ev) => {
@@ -1348,7 +1333,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                   const canModifyEv = isAdmin || (ev.category === 'Meeting' && isLeader);
 
                   return (
-                    <div key={ev.id} className="p-4 space-y-2.5 text-xs">
+                    <div key={ev.id} className="p-3.5 space-y-2 text-xs">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span
@@ -1359,14 +1344,18 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                             {getCategoryLabelBn(ev.category)}
                           </span>
                           {(ev.department || linkedMtg?.department) && (
-                            <span className="px-2 py-0.5 rounded border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-700">
-                              {linkedMtg?.department || ev.department}
+                            <span className="text-[10px] font-semibold text-slate-600">
+                              · {linkedMtg?.department || ev.department}
                             </span>
                           )}
                         </div>
                         <span className="font-mono font-bold text-slate-900 tabular-nums">
                           {ev.startDate}
-                          {ev.endDate !== ev.startDate ? ` → ${ev.endDate}` : ''}
+                          {ev.endDate !== ev.startDate
+                            ? ` → ${ev.endDate} (${toBnDigits(
+                                enumerateDateRange(ev.startDate, ev.endDate).length
+                              )} দিন)`
+                            : ''}
                         </span>
                       </div>
 
@@ -1376,20 +1365,20 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                         <div className="text-amber-900">{bn.formattedFull} · {hj.formattedFull}</div>
                         {(ev.timeLabel || ev.location) && (
                           <div>
-                            {ev.timeLabel && <span>সময়: {ev.timeLabel}</span>}
+                            {ev.timeLabel && <span>{ev.timeLabel}</span>}
                             {ev.timeLabel && ev.location && <span> · </span>}
-                            {ev.location && <span>স্থান: {ev.location}</span>}
+                            {ev.location && <span>{ev.location}</span>}
                           </div>
                         )}
                       </div>
 
                       {canScheduleMeeting && (
-                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
                           {ev.category === 'Meeting' && ev.linkedMeetingId && (
                             <button
                               type="button"
                               onClick={() => handleOpenMeetingMinutes(ev)}
-                              className="px-2.5 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-900 font-semibold cursor-pointer inline-flex items-center gap-1"
+                              className="px-2.5 py-1 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-900 font-semibold cursor-pointer inline-flex items-center gap-1"
                             >
                               <FileText className="w-3 h-3" />
                               {linkedMtg?.meetingStatus === 'Minutes_Added'
@@ -1402,14 +1391,14 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                               <button
                                 type="button"
                                 onClick={() => openEditModal(ev)}
-                                className="px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 font-semibold cursor-pointer inline-flex items-center gap-1"
+                                className="px-2.5 py-1 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 font-semibold cursor-pointer inline-flex items-center gap-1"
                               >
                                 <Edit3 className="w-3 h-3" /> সম্পাদনা
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteEv(ev)}
-                                className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 cursor-pointer"
+                                className="p-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -1427,19 +1416,19 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold">
                   <tr>
-                    <th className="py-3 px-4">তারিখ (ইংরেজি)</th>
-                    <th className="py-3 px-4">বাংলা ও হিজরি তারিখ</th>
-                    <th className="py-3 px-4">ক্যাটাগরি</th>
-                    <th className="py-3 px-4">শিরোনাম ও বিবরণ</th>
-                    <th className="py-3 px-4">সময় ও স্থান</th>
-                    {canScheduleMeeting && <th className="py-3 px-4 text-right">নিয়ন্ত্রণ</th>}
+                    <th className="py-2.5 px-4">তারিখ</th>
+                    <th className="py-2.5 px-4">বাংলা ও হিজরি</th>
+                    <th className="py-2.5 px-4">ধরন</th>
+                    <th className="py-2.5 px-4">শিরোনাম</th>
+                    <th className="py-2.5 px-4">সময় ও স্থান</th>
+                    {canScheduleMeeting && <th className="py-2.5 px-4 text-right">অ্যাকশন</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredListEvents.length === 0 ? (
                     <tr>
-                      <td colSpan={canScheduleMeeting ? 6 : 5} className="py-10 text-center text-slate-500">
-                        নির্বাচিত বছরে কোনো ছুটি, পরীক্ষা, মিটিং বা একাডেমিক কার্যক্রম এখনো যোগ করা হয়নি।
+                      <td colSpan={canScheduleMeeting ? 6 : 5} className="py-8 text-center text-slate-500">
+                        কোনো কার্যক্রম পাওয়া যায়নি।
                       </td>
                     </tr>
                   ) : (
@@ -1453,52 +1442,50 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
 
                       return (
                         <tr key={ev.id} className="hover:bg-slate-50/70">
-                          <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">
+                          <td className="py-3 px-4 font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">
                             {ev.startDate}
                             {ev.endDate !== ev.startDate && (
                               <span className="block text-[11px] font-normal text-slate-500">
-                                থেকে {ev.endDate}
+                                → {ev.endDate} ({toBnDigits(enumerateDateRange(ev.startDate, ev.endDate).length)} দিন)
                               </span>
                             )}
                           </td>
-                          <td className="py-3.5 px-4 whitespace-nowrap text-slate-700">
+                          <td className="py-3 px-4 whitespace-nowrap text-slate-700">
                             <div className="font-semibold text-amber-900">{bn.formattedFull}</div>
                             <div className="text-[11px] text-sky-900">{hj.formattedFull}</div>
                           </td>
-                          <td className="py-3.5 px-4 whitespace-nowrap">
-                            <div className="flex flex-col items-start gap-1">
-                              <span
-                                className={`px-2 py-0.5 rounded border text-[10px] font-bold ${getCategoryBadgeStyle(
-                                  ev.category
-                                )}`}
-                              >
-                                {getCategoryLabelBn(ev.category)}
-                              </span>
-                              {(ev.department || linkedMtg?.department) && (
-                                <span className="text-[10px] text-slate-500 font-semibold">
-                                  {linkedMtg?.department || ev.department}
-                                </span>
-                              )}
-                            </div>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded border text-[10px] font-bold ${getCategoryBadgeStyle(
+                                ev.category
+                              )}`}
+                            >
+                              {getCategoryLabelBn(ev.category)}
+                            </span>
+                            {(ev.department || linkedMtg?.department) && (
+                              <div className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                                {linkedMtg?.department || ev.department}
+                              </div>
+                            )}
                           </td>
-                          <td className="py-3.5 px-4 max-w-sm">
+                          <td className="py-3 px-4 max-w-sm">
                             <div className="font-bold text-slate-900">{ev.title}</div>
                             {ev.description && (
                               <div className="text-[11px] text-slate-600 mt-0.5">{ev.description}</div>
                             )}
                           </td>
-                          <td className="py-3.5 px-4 text-[11px] text-slate-600">
+                          <td className="py-3 px-4 text-[11px] text-slate-600">
                             {ev.timeLabel || ev.location ? (
                               <>
-                                {ev.timeLabel && <div>সময়: {ev.timeLabel}</div>}
-                                {ev.location && <div>স্থান: {ev.location}</div>}
+                                {ev.timeLabel && <div>{ev.timeLabel}</div>}
+                                {ev.location && <div>{ev.location}</div>}
                               </>
                             ) : (
                               <span className="text-slate-400">পূর্ণদিবস</span>
                             )}
                           </td>
                           {canScheduleMeeting && (
-                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
                               <div className="inline-flex items-center gap-1.5">
                                 {ev.category === 'Meeting' && ev.linkedMeetingId && (
                                   <button
@@ -1546,43 +1533,38 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
 
       {/* TAB 4: ADMIN LEAVE POLICY & PER-EMPLOYEE QUOTA CONTROL */}
       {activeTab === 'leave-policy' && isAdmin && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {lpSavedBanner && (
-            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>{lpSavedBanner}</span>
             </div>
           )}
 
           {/* Institutional Global Leave Policy Box */}
-          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-2xs space-y-5">
-            <div className="border-b border-slate-100 pb-3">
-              <h2 className="text-base font-bold text-slate-900">
-                প্রাতিষ্ঠানিক বাৎসরিক ছুটির নীতিমালা ও ক্যালেন্ডার সেটিংস
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                এখান থেকে প্রতিষ্ঠানের নৈমিত্তিক ছুটি (CL), সিক ছুটি (SL) ও অর্জিত ছুটি (EL) চালু আছে কি না এবং বছরে কত দিন তা নির্ধারণ করে সবার জন্য প্রয়োগ করুন।
-              </p>
-            </div>
+          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs space-y-4">
+            <h2 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-2.5">
+              প্রাতিষ্ঠানিক ছুটির নীতিমালা ও সেটিংস
+            </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
               {/* Casual Leave (CL) */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-900">নৈমিত্তিক ছুটি (Casual Leave)</span>
+                  <span className="text-xs font-bold text-slate-900">নৈমিত্তিক ছুটি (CL)</span>
                   <button
                     type="button"
                     onClick={() => setLpClEnabled((v) => !v)}
-                    className={`px-2.5 py-1 rounded text-[11px] font-bold cursor-pointer ${
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer ${
                       lpClEnabled ? 'bg-emerald-800 text-white' : 'bg-slate-200 text-slate-700'
                     }`}
                   >
-                    {lpClEnabled ? 'চালু আছে' : 'বন্ধ'}
+                    {lpClEnabled ? 'চালু' : 'বন্ধ'}
                   </button>
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    বার্ষিক মোট দিন (CL)
+                    বার্ষিক দিন
                   </label>
                   <input
                     type="number"
@@ -1591,28 +1573,28 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     disabled={!lpClEnabled}
                     value={lpClDays}
                     onChange={(e) => setLpClDays(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm font-bold font-mono tabular-nums disabled:opacity-50"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-bold font-mono tabular-nums disabled:opacity-50"
                   />
                 </div>
               </div>
 
               {/* Sick Leave (SL) */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-900">সিক / চিকিৎসা ছুটি (Sick Leave)</span>
+                  <span className="text-xs font-bold text-slate-900">সিক ছুটি (SL)</span>
                   <button
                     type="button"
                     onClick={() => setLpSlEnabled((v) => !v)}
-                    className={`px-2.5 py-1 rounded text-[11px] font-bold cursor-pointer ${
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer ${
                       lpSlEnabled ? 'bg-emerald-800 text-white' : 'bg-slate-200 text-slate-700'
                     }`}
                   >
-                    {lpSlEnabled ? 'চালু আছে' : 'বন্ধ'}
+                    {lpSlEnabled ? 'চালু' : 'বন্ধ'}
                   </button>
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    বার্ষিক মোট দিন (SL)
+                    বার্ষিক দিন
                   </label>
                   <input
                     type="number"
@@ -1621,28 +1603,28 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     disabled={!lpSlEnabled}
                     value={lpSlDays}
                     onChange={(e) => setLpSlDays(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm font-bold font-mono tabular-nums disabled:opacity-50"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-bold font-mono tabular-nums disabled:opacity-50"
                   />
                 </div>
               </div>
 
               {/* Earned Leave (EL) */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-900">অর্জিত ছুটি (Earned Leave)</span>
+                  <span className="text-xs font-bold text-slate-900">অর্জিত ছুটি (EL)</span>
                   <button
                     type="button"
                     onClick={() => setLpElEnabled((v) => !v)}
-                    className={`px-2.5 py-1 rounded text-[11px] font-bold cursor-pointer ${
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer ${
                       lpElEnabled ? 'bg-emerald-800 text-white' : 'bg-rose-700 text-white'
                     }`}
                   >
-                    {lpElEnabled ? 'প্রযোজ্য (আছে)' : 'প্রযোজ্য নয় (নেই)'}
+                    {lpElEnabled ? 'চালু' : 'বন্ধ'}
                   </button>
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    বার্ষিক মোট দিন (EL)
+                    বার্ষিক দিন
                   </label>
                   <input
                     type="number"
@@ -1651,66 +1633,64 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     disabled={!lpElEnabled}
                     value={lpElDays}
                     onChange={(e) => setLpElDays(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm font-bold font-mono tabular-nums disabled:opacity-50"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-bold font-mono tabular-nums disabled:opacity-50"
                   />
                 </div>
               </div>
             </div>
 
             {/* Secondary Controls: Weekly Holidays, Hijri Offset, Academic Year Title */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-slate-100 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 pt-2 border-t border-slate-100 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1.5">শিক্ষাবর্ষ শিরোনাম</label>
+                <label className="block font-bold text-slate-700 mb-1">শিক্ষাবর্ষ</label>
                 <input
                   type="text"
                   value={lpYearLabel}
                   onChange={(e) => setLpYearLabel(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50"
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50"
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1.5">
-                  হিজরি তারিখ সমন্বয় (চাঁদ দেখা অনুযায়ী)
-                </label>
-                <div className="flex gap-2">
+                <label className="block font-bold text-slate-700 mb-1">হিজরি সমন্বয়</label>
+                <div className="flex gap-1.5">
                   {([-1, 0, 1] as const).map((off) => (
                     <button
                       key={off}
                       type="button"
                       onClick={() => setLpHijriOffset(off)}
-                      className={`flex-1 py-2 rounded-lg font-bold border cursor-pointer ${
+                      className={`flex-1 py-1.5 rounded-lg font-bold border cursor-pointer ${
                         lpHijriOffset === off
                           ? 'bg-sky-800 text-white border-sky-800'
                           : 'bg-slate-50 text-slate-700 border-slate-300'
                       }`}
                     >
-                      {off === -1 ? '-১ দিন' : off === 0 ? 'স্বাভাবিক' : '+১ দিন'}
+                      {off === -1 ? '-১ দিন' : off === 0 ? '০' : '+১ দিন'}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1.5">ডিউটি ছুটি (Duty Leave)</label>
+                <label className="block font-bold text-slate-700 mb-1">ডিউটি ছুটি</label>
                 <button
                   type="button"
                   onClick={() => setLpDlEnabled((v) => !v)}
-                  className={`w-full py-2 px-3 rounded-lg border font-bold cursor-pointer ${
+                  className={`w-full py-1.5 px-3 rounded-lg border font-bold cursor-pointer ${
                     lpDlEnabled
                       ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
                       : 'bg-slate-100 border-slate-300 text-slate-600'
                   }`}
                 >
-                  {lpDlEnabled ? '✓ ডিউটি লিভ আবেদন চালু আছে' : 'ডিউটি লিভ বন্ধ'}
+                  {lpDlEnabled ? '✓ চালু' : 'বন্ধ'}
                 </button>
               </div>
             </div>
 
             {/* Weekly Holidays */}
-            <div className="pt-2 border-t border-slate-100 text-xs space-y-2">
-              <label className="block font-bold text-slate-700">সাপ্তাহিক ছুটির দিন (Weekly Holidays)</label>
-              <div className="flex flex-wrap gap-2">
+            <div className="pt-2 border-t border-slate-100 text-xs space-y-1.5">
+              <label className="block font-bold text-slate-700">সাপ্তাহিক ছুটি</label>
+              <div className="flex flex-wrap gap-1.5">
                 {['Friday', 'Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'].map(
                   (day) => {
                     const active = policy.weeklyHolidays.includes(day);
@@ -1724,7 +1704,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                             : [...policy.weeklyHolidays, day];
                           updatePolicy({ weeklyHolidays: updated });
                         }}
-                        className={`px-3 py-1.5 rounded-lg font-semibold border cursor-pointer ${
+                        className={`px-2.5 py-1 rounded-lg font-semibold border cursor-pointer ${
                           active
                             ? 'bg-rose-700 text-white border-rose-700'
                             : 'bg-slate-50 text-slate-700 border-slate-200'
@@ -1739,45 +1719,40 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
             </div>
 
             {/* Action Save Buttons */}
-            <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-slate-100 text-xs">
+            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-3 border-t border-slate-100 text-xs">
               <button
                 type="button"
                 onClick={() => handleSaveLeavePolicy('non_custom')}
-                className="px-4 py-2.5 rounded-lg border border-emerald-800 text-emerald-900 bg-emerald-50 hover:bg-emerald-100 font-bold cursor-pointer"
+                className="px-3.5 py-2 rounded-lg border border-emerald-800 text-emerald-900 bg-emerald-50 hover:bg-emerald-100 font-bold cursor-pointer"
               >
-                সংরক্ষণ করুন (ব্যক্তিগত সমন্বয় অক্ষত রেখে)
+                সংরক্ষণ (কাস্টম কোটা অক্ষত)
               </button>
               <button
                 type="button"
                 onClick={() => handleSaveLeavePolicy('all')}
-                className="px-5 py-2.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white font-bold cursor-pointer flex items-center gap-1.5"
+                className="px-4 py-2 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white font-bold cursor-pointer flex items-center gap-1.5"
               >
-                <CheckCircle2 className="w-4 h-4 text-amber-300" />
-                <span>সকল কর্মীর কোটায় সমানভাবে প্রয়োগ করুন</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-amber-300" />
+                <span>সবার কোটায় প্রয়োগ</span>
               </button>
             </div>
           </div>
 
           {/* Per-Employee Leave Quota Table */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
-            <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-emerald-800" />
-                  <span>কর্মীভেদে ছুটির কোটা ও ব্যালেন্স সমন্বয়</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  প্রয়োজনে নির্দিষ্ট কোনো শিক্ষক বা স্টাফের নৈমিত্তিক, চিকিৎসা বা অর্জিত ছুটি আলাদাভাবে পরিবর্তন করুন।
-                </p>
-              </div>
+            <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Users className="w-4 h-4 text-emerald-800" />
+                <span>কর্মীভেদে ছুটির কোটা</span>
+              </h3>
               <div className="relative">
                 <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   value={empSearch}
                   onChange={(e) => setEmpSearch(e.target.value)}
-                  placeholder="নাম বা আইডি দিয়ে খুঁজুন..."
-                  className="pl-8 pr-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs"
+                  placeholder="নাম বা আইডি খুঁজুন..."
+                  className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 text-xs"
                 />
               </div>
             </div>
@@ -1786,12 +1761,12 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold">
                   <tr>
-                    <th className="py-3 px-4">শিক্ষক / স্টাফ</th>
-                    <th className="py-3 px-4">নৈমিত্তিক (CL)</th>
-                    <th className="py-3 px-4">সিক (SL)</th>
-                    <th className="py-3 px-4">অর্জিত (EL)</th>
-                    <th className="py-3 px-4">নীতিমালার ধরন</th>
-                    <th className="py-3 px-4 text-right">সমন্বয়</th>
+                    <th className="py-2.5 px-4">শিক্ষক / স্টাফ</th>
+                    <th className="py-2.5 px-4">CL (বাকি/মোট)</th>
+                    <th className="py-2.5 px-4">SL (বাকি/মোট)</th>
+                    <th className="py-2.5 px-4">EL (বাকি/মোট)</th>
+                    <th className="py-2.5 px-4">ধরন</th>
+                    <th className="py-2.5 px-4 text-right">সমন্বয়</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1799,57 +1774,52 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     const bal = getEmployeeLeaveBalance(emp.id);
                     return (
                       <tr key={emp.id} className="hover:bg-slate-50/70">
-                        <td className="py-3 px-4">
+                        <td className="py-2.5 px-4">
                           <div className="font-bold text-slate-900">{emp.nameBn || emp.name}</div>
                           <div className="text-[11px] text-slate-500">
                             {emp.id} · {emp.department}
                           </div>
                         </td>
-                        <td className="py-3 px-4 font-mono tabular-nums">
-                          <span className="font-bold text-slate-900">{toBnDigits(bal.casualLeaveTotal)}</span>{' '}
-                          <span className="text-slate-500">
-                            (ব্যবহৃত {toBnDigits(bal.casualLeaveUsed)}, বাকি{' '}
-                            {toBnDigits(Math.max(0, bal.casualLeaveTotal - bal.casualLeaveUsed))})
+                        <td className="py-2.5 px-4 font-mono tabular-nums">
+                          <span className="font-bold text-slate-900">
+                            {toBnDigits(Math.max(0, bal.casualLeaveTotal - bal.casualLeaveUsed))}
                           </span>
+                          <span className="text-slate-400"> / {toBnDigits(bal.casualLeaveTotal)}</span>
                         </td>
-                        <td className="py-3 px-4 font-mono tabular-nums">
-                          <span className="font-bold text-slate-900">{toBnDigits(bal.sickLeaveTotal)}</span>{' '}
-                          <span className="text-slate-500">
-                            (ব্যবহৃত {toBnDigits(bal.sickLeaveUsed)}, বাকি{' '}
-                            {toBnDigits(Math.max(0, bal.sickLeaveTotal - bal.sickLeaveUsed))})
+                        <td className="py-2.5 px-4 font-mono tabular-nums">
+                          <span className="font-bold text-slate-900">
+                            {toBnDigits(Math.max(0, bal.sickLeaveTotal - bal.sickLeaveUsed))}
                           </span>
+                          <span className="text-slate-400"> / {toBnDigits(bal.sickLeaveTotal)}</span>
                         </td>
-                        <td className="py-3 px-4 font-mono tabular-nums">
+                        <td className="py-2.5 px-4 font-mono tabular-nums">
                           {bal.earnedLeaveTotal === 0 && !institutionalLeavePolicy.earnedLeaveEnabled && !bal.isCustomQuota ? (
                             <span className="text-rose-700 font-semibold">বন্ধ</span>
                           ) : (
                             <>
                               <span className="font-bold text-slate-900">
-                                {toBnDigits(bal.earnedLeaveTotal)}
-                              </span>{' '}
-                              <span className="text-slate-500">
-                                (ব্যবহৃত {toBnDigits(bal.earnedLeaveUsed)}, বাকি{' '}
-                                {toBnDigits(Math.max(0, bal.earnedLeaveTotal - bal.earnedLeaveUsed))})
+                                {toBnDigits(Math.max(0, bal.earnedLeaveTotal - bal.earnedLeaveUsed))}
                               </span>
+                              <span className="text-slate-400"> / {toBnDigits(bal.earnedLeaveTotal)}</span>
                             </>
                           )}
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-2.5 px-4">
                           <span
                             className={`text-[11px] font-semibold ${
                               bal.isCustomQuota ? 'text-amber-800' : 'text-emerald-800'
                             }`}
                           >
-                            {bal.isCustomQuota ? 'ব্যক্তিগত সমন্বয়' : 'প্রাতিষ্ঠানিক নিয়ম'}
+                            {bal.isCustomQuota ? 'কাস্টম' : 'সাধারণ'}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-right">
+                        <td className="py-2.5 px-4 text-right">
                           <button
                             type="button"
                             onClick={() => openEmpQuotaModal(emp)}
-                            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-semibold cursor-pointer inline-flex items-center gap-1"
+                            className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-semibold cursor-pointer inline-flex items-center gap-1"
                           >
-                            <Edit3 className="w-3 h-3" /> সমন্বয়
+                            <Edit3 className="w-3 h-3" /> এডিট
                           </button>
                         </td>
                       </tr>
@@ -1870,9 +1840,9 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               <h3 className="text-base font-bold text-slate-900">
                 {editingEventId
                   ? evCategory === 'Meeting'
-                    ? 'নির্ধারিত মিটিং সম্পাদনা করুন'
-                    : 'ক্যালেন্ডার কার্যক্রম সম্পাদনা করুন'
-                  : 'ক্যালেন্ডারে নতুন তারিখ যোগ করুন'}
+                    ? 'মিটিং সম্পাদনা'
+                    : 'কার্যক্রম সম্পাদনা'
+                  : 'নতুন তারিখ যোগ'}
               </h3>
               <button
                 type="button"
@@ -1883,16 +1853,16 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               </button>
             </div>
 
-            <form onSubmit={handleSaveEvent} className="space-y-4 text-xs">
+            <form onSubmit={handleSaveEvent} className="space-y-3.5 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1.5">ধরন / ক্যাটাগরি নির্বাচন করুন *</label>
+                <label className="block font-bold text-slate-700 mb-1.5">ধরন *</label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {(
                     [
-                      { val: 'Holiday', label: 'সরকারি/প্রতিষ্ঠান ছুটি', adminOnly: true },
-                      { val: 'Academic', label: 'একাডেমিক কার্যক্রম', adminOnly: true },
-                      { val: 'Exam', label: 'পরীক্ষা ও মূল্যায়ন', adminOnly: true },
-                      { val: 'Event', label: 'ইভেন্ট ও সেমিনার', adminOnly: true },
+                      { val: 'Holiday', label: 'ছুটি', adminOnly: true },
+                      { val: 'Academic', label: 'একাডেমিক', adminOnly: true },
+                      { val: 'Exam', label: 'পরীক্ষা', adminOnly: true },
+                      { val: 'Event', label: 'ইভেন্ট', adminOnly: true },
                       { val: 'Special_Working_Day', label: 'বিশেষ কর্মদিবস', adminOnly: true },
                       { val: 'Meeting', label: 'মিটিং / সভা', adminOnly: false },
                     ] as const
@@ -1922,29 +1892,25 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                 </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  {evCategory === 'Meeting' ? 'মিটিং / সভার শিরোনাম *' : 'শিরোনাম *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={evTitle}
-                  onChange={(e) => setEvTitle(e.target.value)}
-                  placeholder={
-                    evCategory === 'Meeting'
-                      ? 'যেমন: মাসিক একাডেমিক পর্যালোচনা ও কর্মপরিকল্পনা সভা'
-                      : 'যেমন: ঈদুল ফিতরের ছুটি / অর্ধবার্ষিক পরীক্ষা শুরু / একাডেমিক সেমিনার'
-                  }
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-900"
-                />
-              </div>
+              {(evCategory === 'Meeting' || editingEventId) && (
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">শিরোনাম *</label>
+                  <input
+                    type="text"
+                    required
+                    value={evTitle}
+                    onChange={(e) => setEvTitle(e.target.value)}
+                    placeholder="শিরোনাম লিখুন..."
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-900"
+                  />
+                </div>
+              )}
 
               {evCategory === 'Meeting' ? (
                 <>
                   {/* Meeting Department Chips + Input */}
                   <div className="space-y-1.5">
-                    <label className="block font-bold text-slate-700">ডিপার্টমেন্ট / বিভাগ *</label>
+                    <label className="block font-bold text-slate-700">বিভাগ *</label>
                     <div className="flex flex-wrap gap-1.5">
                       {departmentOptions.map((dept) => (
                         <button
@@ -1965,7 +1931,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                       type="text"
                       value={evDepartment}
                       onChange={(e) => setEvDepartment(e.target.value)}
-                      placeholder="অথবা কাস্টম বিভাগ লিখুন..."
+                      placeholder="অথবা কাস্টম বিভাগ..."
                       className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 text-slate-900"
                     />
                   </div>
@@ -1986,7 +1952,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                       />
                     </div>
                     <div>
-                      <label className="block font-bold text-slate-700 mb-1">শুরুর সময় *</label>
+                      <label className="block font-bold text-slate-700 mb-1">শুরু *</label>
                       <input
                         type="time"
                         required
@@ -1996,7 +1962,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                       />
                     </div>
                     <div>
-                      <label className="block font-bold text-slate-700 mb-1">সমাপ্তির সময়</label>
+                      <label className="block font-bold text-slate-700 mb-1">শেষ</label>
                       <input
                         type="time"
                         value={evEndTime}
@@ -2006,18 +1972,10 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     </div>
                   </div>
 
-                  {evStartDate && (
-                    <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-700 flex flex-wrap gap-3">
-                      <span>বাংলা: {getBengaliDateInfo(evStartDate).formattedFull}</span>
-                      <span>·</span>
-                      <span>হিজরি: {getHijriDateInfo(evStartDate, hijriOffset).formattedFull}</span>
-                    </div>
-                  )}
-
                   {/* Venue, Chairperson, Secretary */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block font-bold text-slate-700 mb-1">স্থান / ভেন্যু</label>
+                      <label className="block font-bold text-slate-700 mb-1">স্থান</label>
                       <input
                         type="text"
                         value={evLocation}
@@ -2032,12 +1990,12 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                         type="text"
                         value={evChairperson}
                         onChange={(e) => setEvChairperson(e.target.value)}
-                        placeholder="সভার সভাপতি"
+                        placeholder="সভাপতি"
                         className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold text-slate-700 mb-1">সঞ্চালক / সচিব</label>
+                      <label className="block font-bold text-slate-700 mb-1">সঞ্চালক</label>
                       <input
                         type="text"
                         value={evSecretary}
@@ -2051,13 +2009,13 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                   {/* Agenda */}
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">
-                      আলোচ্যসূচি / এজেন্ডা (প্রতি লাইনে একটি বিষয়)
+                      আলোচ্যসূচি (প্রতি লাইনে একটি)
                     </label>
                     <textarea
-                      rows={3}
+                      rows={2}
                       value={evAgendaText}
                       onChange={(e) => setEvAgendaText(e.target.value)}
-                      placeholder={'যেমন:\n১. পূর্ববর্তী সভার সিদ্ধান্ত পর্যালোচনা\n২. আসন্ন পরীক্ষার রুটিন চূড়ান্তকরণ\n৩. বিভাগীয় বাজেট ও সমন্বয়'}
+                      placeholder="আলোচ্য বিষয়..."
                       className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50"
                     />
                   </div>
@@ -2067,10 +2025,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="font-bold text-slate-800 inline-flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-purple-800" />
-                        <span>মিটিংয়ে আমন্ত্রিত / উপস্থিত ব্যক্তিগণ</span>
-                        <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-900 font-mono text-[10px]">
-                          {toBnDigits(evInvitedIds.length)} জন নির্বাচিত
-                        </span>
+                        <span>আমন্ত্রিত সদস্য ({toBnDigits(evInvitedIds.length)})</span>
                       </label>
                       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                         <button
@@ -2078,7 +2033,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                           onClick={selectDepartmentEmployees}
                           className="px-2 py-1 rounded bg-white border border-purple-200 text-purple-900 font-semibold hover:bg-purple-50 cursor-pointer"
                         >
-                          {evDepartment === 'সকল বিভাগ' ? 'সকল স্টাফ' : `${evDepartment} যুক্ত`}
+                          {evDepartment === 'সকল বিভাগ' ? 'সকল স্টাফ' : `${evDepartment}`}
                         </button>
                         <button
                           type="button"
@@ -2105,12 +2060,12 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                         type="text"
                         value={evParticipantSearch}
                         onChange={(e) => setEvParticipantSearch(e.target.value)}
-                        placeholder="শিক্ষক বা স্টাফের নাম দিয়ে খুঁজুন..."
+                        placeholder="নাম খুঁজুন..."
                         className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
                       />
                     </div>
 
-                    <div className="max-h-40 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+                    <div className="max-h-36 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
                       {filteredModalEmployees.map((emp) => {
                         const checked = evInvitedIds.includes(emp.id);
                         return (
@@ -2153,37 +2108,206 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                 </>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">শুরুর তারিখ *</label>
-                      <input
-                        type="date"
-                        required
-                        value={evStartDate}
-                        onChange={(e) => {
-                          setEvStartDate(e.target.value);
-                          if (evEndDate < e.target.value) setEvEndDate(e.target.value);
-                        }}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50"
-                      />
+                  {editingEventId ? (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-bold text-slate-700 mb-1">
+                            শুরুর তারিখ (থেকে) *
+                          </label>
+                          <input
+                            type="date"
+                            required
+                            value={evStartDate}
+                            onChange={(e) => {
+                              setEvStartDate(e.target.value);
+                              if (evEndDate < e.target.value) setEvEndDate(e.target.value);
+                            }}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-bold text-slate-700 mb-1">
+                            শেষ তারিখ (পর্যন্ত) *
+                          </label>
+                          <input
+                            type="date"
+                            value={evEndDate}
+                            min={evStartDate}
+                            onChange={(e) => setEvEndDate(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 font-mono"
+                          />
+                        </div>
+                      </div>
+                      {evStartDate && (
+                        <div className="px-3 py-1.5 rounded-lg bg-emerald-50/70 border border-emerald-200 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <span className="font-bold text-emerald-950">
+                            মোট দিন:{' '}
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-800 text-white font-mono">
+                              {toBnDigits(
+                                enumerateDateRange(
+                                  evStartDate,
+                                  evEndDate >= evStartDate ? evEndDate : evStartDate
+                                ).length
+                              )}{' '}
+                              দিন
+                            </span>
+                          </span>
+                          <span className="text-slate-600">
+                            {evStartDate === evEndDate
+                              ? `${getBengaliDateInfo(evStartDate).formattedFull} · ${
+                                  getHijriDateInfo(evStartDate, hijriOffset).formattedShort
+                                }`
+                              : `${getBengaliDateInfo(evStartDate).formattedShort} → ${
+                                  getBengaliDateInfo(evEndDate).formattedShort
+                                }`}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">শেষ তারিখ (একই দিন হলে অপরিবর্তিত রাখুন)</label>
-                      <input
-                        type="date"
-                        value={evEndDate}
-                        min={evStartDate}
-                        onChange={(e) => setEvEndDate(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50"
-                      />
-                    </div>
-                  </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <label className="font-bold text-slate-800">
+                          তারিখ রেঞ্জ ও শিরোনাম তালিকা ({toBnDigits(evBatchRows.length)} টি সারি)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const lastRow = evBatchRows[evBatchRows.length - 1];
+                            const nextStart = lastRow?.endDate || selectedDate || todayStr;
+                            setEvBatchRows((prev) => [
+                              ...prev,
+                              { title: '', startDate: nextStart, endDate: nextStart },
+                            ]);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <PlusCircle className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>+ আরও ছুটি / তারিখ যোগ</span>
+                        </button>
+                      </div>
 
-                  {evStartDate && (
-                    <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-700 flex flex-wrap gap-3">
-                      <span>বাংলা: {getBengaliDateInfo(evStartDate).formattedFull}</span>
-                      <span>·</span>
-                      <span>হিজরি: {getHijriDateInfo(evStartDate, hijriOffset).formattedFull}</span>
+                      <div className="space-y-2.5 max-h-64 overflow-y-auto pr-0.5">
+                        {evBatchRows.map((row, idx) => {
+                          const normalizedRowEnd =
+                            row.endDate && row.endDate >= row.startDate
+                              ? row.endDate
+                              : row.startDate;
+                          const dayCount = row.startDate
+                            ? enumerateDateRange(row.startDate, normalizedRowEnd).length
+                            : 1;
+
+                          return (
+                            <div
+                              key={idx}
+                              className="p-3 rounded-xl border border-slate-200 bg-slate-50/80 space-y-2"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <input
+                                  type="text"
+                                  required
+                                  value={row.title}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setEvBatchRows((prev) => {
+                                      const copy = [...prev];
+                                      copy[idx] = { ...copy[idx], title: val };
+                                      return copy;
+                                    });
+                                  }}
+                                  placeholder={`${toBnDigits(idx + 1)}. শিরোনাম লিখুন (যেমন: ঈদুল ফিতরের ছুটি)...`}
+                                  className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-semibold"
+                                />
+                                {evBatchRows.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setEvBatchRows((prev) => prev.filter((_, i) => i !== idx))
+                                    }
+                                    title="সারি মুছুন"
+                                    className="p-1.5 rounded-lg border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 cursor-pointer shrink-0"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                                    শুরুর তারিখ (থেকে) *
+                                  </label>
+                                  <input
+                                    type="date"
+                                    required
+                                    value={row.startDate}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEvBatchRows((prev) => {
+                                        const copy = [...prev];
+                                        const curEnd = copy[idx].endDate;
+                                        copy[idx] = {
+                                          ...copy[idx],
+                                          startDate: val,
+                                          endDate: curEnd < val ? val : curEnd,
+                                        };
+                                        return copy;
+                                      });
+                                    }}
+                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                                    শেষ তারিখ (পর্যন্ত) *
+                                  </label>
+                                  <input
+                                    type="date"
+                                    required
+                                    min={row.startDate}
+                                    value={row.endDate}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEvBatchRows((prev) => {
+                                        const copy = [...prev];
+                                        copy[idx] = { ...copy[idx], endDate: val };
+                                        return copy;
+                                      });
+                                    }}
+                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono"
+                                  />
+                                </div>
+                              </div>
+
+                              {row.startDate && (
+                                <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 text-[11px]">
+                                  <span className="inline-flex items-center gap-1.5 font-bold text-emerald-900">
+                                    <span className="px-2 py-0.5 rounded bg-emerald-800 text-white font-mono tabular-nums">
+                                      {toBnDigits(dayCount)} দিন
+                                    </span>
+                                    {row.startDate !== normalizedRowEnd && (
+                                      <span className="font-mono text-slate-600">
+                                        ({row.startDate} → {normalizedRowEnd})
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="text-slate-500">
+                                    {row.startDate === normalizedRowEnd
+                                      ? `${getBengaliDateInfo(row.startDate).formattedShort} · ${
+                                          getHijriDateInfo(row.startDate, hijriOffset).formattedShort
+                                        }`
+                                      : `${getBengaliDateInfo(row.startDate).formattedShort} → ${
+                                          getBengaliDateInfo(normalizedRowEnd).formattedShort
+                                        }`}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
@@ -2194,7 +2318,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                         type="text"
                         value={evTimeLabel}
                         onChange={(e) => setEvTimeLabel(e.target.value)}
-                        placeholder="যেমন: সকাল ১০:০০ - ১২:০০"
+                        placeholder="সকাল ১০:০০ - ১২:০০"
                         className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50"
                       />
                     </div>
@@ -2204,19 +2328,19 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                         type="text"
                         value={evLocation}
                         onChange={(e) => setEvLocation(e.target.value)}
-                        placeholder="যেমন: মূল অডিটোরিয়াম"
+                        placeholder="অডিটোরিয়াম"
                         className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">বিস্তারিত নির্দেশনা (ঐচ্ছিক)</label>
+                    <label className="block font-bold text-slate-700 mb-1">বিবরণ (ঐচ্ছিক)</label>
                     <textarea
                       rows={2}
                       value={evDescription}
                       onChange={(e) => setEvDescription(e.target.value)}
-                      placeholder="অতিরিক্ত তথ্য বা নির্দেশনা লিখুন..."
+                      placeholder="সংক্ষিপ্ত বিবরণ..."
                       className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50"
                     />
                   </div>
@@ -2239,11 +2363,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                       : 'bg-emerald-900 hover:bg-emerald-800'
                   }`}
                 >
-                  {editingEventId
-                    ? 'পরিবর্তন সংরক্ষণ করুন'
-                    : evCategory === 'Meeting'
-                    ? 'মিটিং ও ক্যালেন্ডারে যুক্ত করুন'
-                    : 'ক্যালেন্ডারে যুক্ত করুন'}
+                  সংরক্ষণ করুন
                 </button>
               </div>
             </form>
@@ -2254,17 +2374,15 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
       {/* CONFIRM DELETE EVENT MODAL */}
       {confirmDeleteEv && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 border border-slate-200 shadow-xl space-y-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 border border-slate-200 shadow-xl space-y-4">
             <div className="flex items-start gap-3">
-              <div className="p-2.5 rounded-xl bg-rose-50 text-rose-700 shrink-0">
+              <div className="p-2 rounded-xl bg-rose-50 text-rose-700 shrink-0">
                 <AlertTriangle className="w-5 h-5" />
               </div>
               <div className="space-y-1">
                 <h3 className="text-base font-bold text-slate-900">ক্যালেন্ডার থেকে মুছে ফেলবেন?</h3>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  আপনি কি নিশ্চিত যে <strong>&ldquo;{confirmDeleteEv.title}&rdquo;</strong> ({confirmDeleteEv.startDate}) মুছে ফেলতে চান?
-                  {confirmDeleteEv.linkedMeetingId &&
-                    ' এটি একটি নির্ধারিত মিটিং—মুছে ফেললে মিটিং মিনিটস তালিকা থেকেও সংশ্লিষ্ট এন্ট্রিটি মুছে যাবে।'}
+                <p className="text-xs text-slate-600">
+                  <strong>&ldquo;{confirmDeleteEv.title}&rdquo;</strong> ({confirmDeleteEv.startDate}) মুছে ফেলা হবে।
                 </p>
               </div>
             </div>
@@ -2285,7 +2403,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                 }}
                 className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-semibold cursor-pointer"
               >
-                হ্যাঁ, মুছে ফেলুন
+                মুছে ফেলুন
               </button>
             </div>
           </div>
@@ -2295,12 +2413,10 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
       {/* MODAL 2: PER-EMPLOYEE LEAVE QUOTA EDITOR */}
       {editingQuotaEmp && isAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 border border-slate-200 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 border border-slate-200 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
               <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  ব্যক্তিগত ছুটির কোটা সমন্বয়
-                </h3>
+                <h3 className="text-base font-bold text-slate-900">ছুটির কোটা সমন্বয়</h3>
                 <p className="text-xs text-slate-500">
                   {editingQuotaEmp.nameBn || editingQuotaEmp.name} ({editingQuotaEmp.id})
                 </p>
@@ -2314,9 +2430,9 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               </button>
             </div>
 
-            <form onSubmit={handleSaveEmpQuota} className="space-y-4 text-xs">
+            <form onSubmit={handleSaveEmpQuota} className="space-y-3.5 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">নৈমিত্তিক ছুটি (CL) — মোট দিন</label>
+                <label className="block font-bold text-slate-700 mb-1">নৈমিত্তিক ছুটি (CL)</label>
                 <input
                   type="number"
                   min="0"
@@ -2328,7 +2444,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">সিক / চিকিৎসা ছুটি (SL) — মোট দিন</label>
+                <label className="block font-bold text-slate-700 mb-1">সিক ছুটি (SL)</label>
                 <input
                   type="number"
                   min="0"
@@ -2340,7 +2456,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">অর্জিত ছুটি (EL) — মোট দিন</label>
+                <label className="block font-bold text-slate-700 mb-1">অর্জিত ছুটি (EL)</label>
                 <input
                   type="number"
                   min="0"
@@ -2360,7 +2476,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                   }}
                   className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold cursor-pointer inline-flex items-center gap-1"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" /> প্রাতিষ্ঠানিক নিয়মে ফেরান
+                  <RotateCcw className="w-3.5 h-3.5" /> রিসেট
                 </button>
 
                 <div className="flex items-center gap-2">
@@ -2375,7 +2491,7 @@ export function AnnualCalendar({ initialTab = 'month' }: AnnualCalendarProps) {
                     type="submit"
                     className="px-4 py-2 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white font-semibold cursor-pointer"
                   >
-                    সংরক্ষণ করুন
+                    সংরক্ষণ
                   </button>
                 </div>
               </div>

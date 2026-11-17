@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '@/lib/store';
-import { DEFAULT_INSTITUTION_LOGO } from '@/lib/initial-data';
+import { resolveInstitutionLogo } from '@/lib/initial-data';
 import {
   User,
   KeyRound,
@@ -13,8 +13,8 @@ import {
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 
 export function LoginScreen() {
-  const { login, connectGoogleWorkspace, employees, policy } = useApp();
-  const activeLogoUrl = policy.institutionLogoUrl || DEFAULT_INSTITUTION_LOGO;
+  const { employees, login, connectGoogleWorkspace, policy } = useApp();
+  const activeLogoUrl = resolveInstitutionLogo(policy.institutionLogoUrl);
 
   const [identifier, setIdentifier] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -64,14 +64,20 @@ export function LoginScreen() {
       <div className="max-w-md w-full bg-white rounded-2xl border border-slate-200 shadow-md p-6 sm:p-8 space-y-6">
         {/* Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-xl bg-white border border-slate-200 p-1.5 shadow-2xs overflow-hidden">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={activeLogoUrl}
-              alt="আস-সুন্নাহ দাওয়াহ অ্যান্ড রিসার্চ ইনস্টিটিউট লোগো"
-              className="w-full h-full object-contain"
-            />
-          </div>
+          {activeLogoUrl ? (
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-white border border-slate-200 p-2 shadow-2xs overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={activeLogoUrl}
+                alt="Institution Logo"
+                className="w-full h-full object-contain"
+              />
+            </div>
+          ) : (
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-emerald-900 text-amber-400 border border-amber-500/40 font-bold text-2xl">
+              আ
+            </div>
+          )}
           <h1 className="text-xl font-bold text-slate-900">
             আস-সুন্নাহ দাওয়াহ অ্যান্ড রিসার্চ ইনস্টিটিউট
           </h1>

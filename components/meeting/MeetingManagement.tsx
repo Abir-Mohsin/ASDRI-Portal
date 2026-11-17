@@ -17,10 +17,8 @@ import {
   PlusCircle,
   CheckCircle2,
   X,
-  Clock,
   MapPin,
   Users,
-  Building2,
   FileText,
   CalendarDays,
   Printer,
@@ -405,78 +403,64 @@ export function MeetingManagement() {
   };
 
   return (
-    <div className="space-y-5 font-serif">
+    <div className="space-y-4 font-serif">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-6 rounded-xl border border-slate-200 shadow-2xs">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-purple-900 font-semibold">
-            <FileText className="w-4 h-4" />
-            <span>বাৎসরিক ক্যালেন্ডার ও সিদ্ধান্ত ট্র্যাকারের সাথে সমন্বিত</span>
-          </div>
-          <h1 className="text-xl font-bold text-slate-900 mt-1">
-            মিটিং মিনিটস ও সভার কার্যবিবরণী
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            ক্যালেন্ডারে নির্ধারিত সভাসমূহের উপস্থিতি, আলোচ্যসূচি, কার্যবিবরণী এবং গৃহীত সিদ্ধান্ত সংরক্ষণ।
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-4 sm:px-5 py-3.5 rounded-xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center gap-2.5">
+          <FileText className="w-5 h-5 text-emerald-900 shrink-0" />
+          <h1 className="text-lg sm:text-xl font-bold text-slate-900">মিটিং ও কার্যবিবরণী</h1>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setActiveNav('calendar')}
-            className="px-3.5 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
           >
-            <CalendarDays className="w-4 h-4 text-emerald-800" />
-            <span>ক্যালেন্ডারে ফিরে যান</span>
+            <CalendarDays className="w-3.5 h-3.5 text-emerald-800" />
+            <span>ক্যালেন্ডার</span>
           </button>
 
           {canManageMeetings && (
             <button
               type="button"
               onClick={openCreateModal}
-              className="px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+              className="px-3.5 py-2 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
             >
-              <PlusCircle className="w-4 h-4 text-amber-300" />
-              <span>নতুন মিটিং মিনিটস যোগ করুন</span>
+              <PlusCircle className="w-3.5 h-3.5 text-amber-300" />
+              <span>নতুন মিটিং</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Pending / Overdue Minutes Alert Strip */}
+      {/* Compact Pending Minutes Strip */}
       {canManageMeetings && scheduledPendingMeetings.length > 0 && (
-        <div className="bg-amber-50/90 border border-amber-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-            <div className="text-xs space-y-0.5">
-              <div className="font-bold text-amber-950">
-                মিনিটস সম্পন্ন বাকি রয়েছে: {toBnDigits(scheduledPendingMeetings.length)} টি নির্ধারিত সভা
-                {overduePendingMeetings.length > 0 && (
-                  <span className="text-rose-700">
-                    {' '}
-                    ({toBnDigits(overduePendingMeetings.length)} টি সভার তারিখ অতিক্রান্ত বা আজ)
-                  </span>
-                )}
-              </div>
-              <div className="text-amber-800">
-                সভা সম্পন্ন হওয়ার পর নিচে &ldquo;মিনিটস লিখুন&rdquo; বাটনে ক্লিক করে উপস্থিতি ও গৃহীত সিদ্ধান্ত যোগ করুন।
-              </div>
-            </div>
+        <div className="bg-amber-50/90 border border-amber-200 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-amber-950 font-semibold">
+            <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+            <span>
+              মিনিটস বাকি: <strong className="font-mono">{toBnDigits(scheduledPendingMeetings.length)}</strong> টি সভা
+              {overduePendingMeetings.length > 0 && (
+                <span className="text-rose-700 ml-1">
+                  ({toBnDigits(overduePendingMeetings.length)} টি তারিখ অতিক্রান্ত)
+                </span>
+              )}
+            </span>
           </div>
 
           <button
             type="button"
             onClick={() => setStatusFilter('Scheduled')}
-            className="px-3 py-1.5 rounded-lg bg-amber-800 hover:bg-amber-900 text-white text-xs font-semibold cursor-pointer shrink-0 self-start md:self-auto"
+            className="px-2.5 py-1 rounded-md bg-amber-800 hover:bg-amber-900 text-white text-[11px] font-semibold cursor-pointer shrink-0"
           >
-            বাকিগুলো দেখুন ({toBnDigits(scheduledPendingMeetings.length)})
+            দেখুন
           </button>
         </div>
       )}
 
       {/* Filter Tabs & Search */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <button
             type="button"
@@ -487,7 +471,7 @@ export function MeetingManagement() {
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            সব মিটিং ({toBnDigits(visibleMeetings.length)})
+            সব ({toBnDigits(visibleMeetings.length)})
           </button>
           <button
             type="button"
@@ -498,7 +482,7 @@ export function MeetingManagement() {
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            নির্ধারিত / মিনিটস বাকি ({toBnDigits(scheduledPendingMeetings.length)})
+            মিনিটস বাকি ({toBnDigits(scheduledPendingMeetings.length)})
           </button>
           <button
             type="button"
@@ -509,7 +493,7 @@ export function MeetingManagement() {
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            মিনিটস সম্পন্ন ({toBnDigits(completedMinutesCount)})
+            সম্পন্ন ({toBnDigits(completedMinutesCount)})
           </button>
         </div>
 
@@ -519,24 +503,24 @@ export function MeetingManagement() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="মিটিং, ডিপার্টমেন্ট বা এজেন্ডা খুঁজুন..."
-            className="w-full sm:w-64 pl-8 pr-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs"
+            placeholder="মিটিং খুঁজুন..."
+            className="w-full sm:w-56 pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 text-xs"
           />
         </div>
       </div>
 
       {/* Meetings List */}
-      <div className="space-y-4">
+      <div className="space-y-3">
         {filteredMeetings.length === 0 ? (
-          <div className="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center space-y-2 text-xs text-slate-500">
-            <p>কোনো নির্ধারিত মিটিং বা মিনিটস পাওয়া যায়নি।</p>
+          <div className="bg-white rounded-xl border border-dashed border-slate-300 p-8 text-center space-y-1.5 text-xs text-slate-500">
+            <p>কোনো মিটিং পাওয়া যায়নি।</p>
             {canManageMeetings && (
               <button
                 type="button"
-                onClick={() => setActiveNav('calendar')}
+                onClick={openCreateModal}
                 className="text-emerald-800 font-bold hover:underline cursor-pointer"
               >
-                ক্যালেন্ডার থেকে নতুন মিটিং নির্ধারণ করুন →
+                + নতুন মিটিং যুক্ত করুন
               </button>
             )}
           </div>
@@ -546,201 +530,202 @@ export function MeetingManagement() {
             const isHighlighted = highlightedMeetingId === meeting.id;
             const invitedList = meeting.invitedEmployeeIds || [];
             const attendedList = meeting.actualAttendeeIds || [];
+            const memberNames =
+              attendedList.length > 0
+                ? attendedList.map(getEmployeeName)
+                : invitedList.length > 0
+                ? invitedList.map(getEmployeeName)
+                : meeting.participants;
 
             return (
               <div
                 key={meeting.id}
-                className={`bg-white rounded-xl border p-4 sm:p-6 shadow-2xs space-y-4 transition-colors ${
+                className={`bg-white rounded-xl border p-4 sm:p-5 shadow-2xs space-y-3 transition-colors ${
                   isHighlighted
                     ? 'border-purple-600 ring-2 ring-purple-100'
                     : 'border-slate-200'
                 }`}
               >
-                <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 border-b border-slate-100 pb-3.5">
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
+                {/* Top Row: Title + Meta + Actions */}
+                <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px]">
                       <span
-                        className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
-                          isScheduled
-                            ? 'bg-purple-50 text-purple-900 border-purple-200'
-                            : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                        className={`inline-flex items-center gap-1 font-bold ${
+                          isScheduled ? 'text-amber-800' : 'text-emerald-800'
                         }`}
                       >
-                        {isScheduled ? 'নির্ধারিত · মিনিটস বাকি' : 'মিনিটস সম্পন্ন'}
+                        <span
+                          className={`w-2 h-2 rounded-full ${
+                            isScheduled ? 'bg-amber-500' : 'bg-emerald-600'
+                          }`}
+                        />
+                        {isScheduled ? 'মিনিটস বাকি' : 'সম্পন্ন'}
                       </span>
 
-                      {meeting.department && (
-                        <span className="px-2 py-0.5 rounded border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-700 inline-flex items-center gap-1">
-                          <Building2 className="w-3 h-3 text-slate-500" />
-                          {meeting.department}
-                        </span>
+                      <span className="text-slate-300">·</span>
+                      <span className="font-mono tabular-nums font-bold text-slate-800">
+                        {meeting.date}
+                      </span>
+
+                      {(meeting.startTime || meeting.endTime) && (
+                        <>
+                          <span className="text-slate-300">·</span>
+                          <span className="font-mono tabular-nums text-slate-600">
+                            {meeting.startTime}
+                            {meeting.endTime ? `-${meeting.endTime}` : ''}
+                          </span>
+                        </>
                       )}
 
-                      {meeting.calendarEventId && (
-                        <span className="text-[10px] font-semibold text-slate-500 inline-flex items-center gap-1">
-                          <CalendarDays className="w-3 h-3 text-emerald-700" />
-                          ক্যালেন্ডারের সাথে যুক্ত
-                        </span>
+                      {meeting.department && (
+                        <>
+                          <span className="text-slate-300">·</span>
+                          <span className="font-semibold text-slate-700">{meeting.department}</span>
+                        </>
+                      )}
+
+                      {meeting.venue && (
+                        <>
+                          <span className="text-slate-300">·</span>
+                          <span className="text-slate-600 inline-flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-slate-400" />
+                            {meeting.venue}
+                          </span>
+                        </>
                       )}
                     </div>
 
                     <h2 className="text-base font-bold text-slate-900">{meeting.title}</h2>
 
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-                      <span>
-                        সভাপতি: <strong className="text-slate-900">{meeting.chairperson || 'নির্ধারিত নয়'}</strong>
-                      </span>
-                      {meeting.secretary && (
-                        <span>
-                          সঞ্চালক/সচিব: <strong className="text-slate-900">{meeting.secretary}</strong>
-                        </span>
-                      )}
-                      {meeting.venue && (
-                        <span className="inline-flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-slate-400" />
-                          {meeting.venue}
-                        </span>
-                      )}
-                      {(meeting.startTime || meeting.endTime) && (
-                        <span className="inline-flex items-center gap-1 font-mono tabular-nums">
-                          <Clock className="w-3 h-3 text-slate-400" />
-                          {meeting.startTime}
-                          {meeting.endTime ? ` - ${meeting.endTime}` : ''}
-                        </span>
-                      )}
-                    </div>
+                    {(meeting.chairperson || meeting.secretary) && (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-600">
+                        {meeting.chairperson && (
+                          <span>
+                            সভাপতি: <strong className="text-slate-800">{meeting.chairperson}</strong>
+                          </span>
+                        )}
+                        {meeting.secretary && (
+                          <span>
+                            সঞ্চালক: <strong className="text-slate-800">{meeting.secretary}</strong>
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex flex-col sm:items-end gap-2 shrink-0">
-                    <span className="text-xs font-mono tabular-nums font-semibold text-emerald-900 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200 w-fit">
-                      তারিখ: {meeting.date}
-                    </span>
-
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                      {canManageMeetings && (
-                        <button
-                          type="button"
-                          onClick={() => populateModalForMeeting(meeting)}
-                          className={`px-3 py-1.5 rounded-lg font-bold cursor-pointer inline-flex items-center gap-1 border ${
-                            isScheduled
-                              ? 'bg-purple-900 hover:bg-purple-800 text-white border-purple-900'
-                              : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200'
-                          }`}
-                        >
-                          <Edit3 className="w-3 h-3" />
-                          <span>
-                            {isScheduled ? 'মিনিটস লিখুন / যোগ করুন' : 'মিনিটস সম্পাদনা'}
-                          </span>
-                        </button>
-                      )}
-
+                  {/* Actions */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] shrink-0">
+                    {canManageMeetings && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setFocusedCalendarDate(meeting.date);
-                          setActiveNav('calendar');
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold cursor-pointer inline-flex items-center gap-1"
+                        onClick={() => populateModalForMeeting(meeting)}
+                        className={`px-2.5 py-1.5 rounded-lg font-bold cursor-pointer inline-flex items-center gap-1 border ${
+                          isScheduled
+                            ? 'bg-purple-900 hover:bg-purple-800 text-white border-purple-900'
+                            : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200'
+                        }`}
                       >
-                        <CalendarDays className="w-3 h-3 text-emerald-700" />
-                        <span>ক্যালেন্ডার</span>
+                        <Edit3 className="w-3 h-3" />
+                        <span>{isScheduled ? 'মিনিটস লিখুন' : 'সম্পাদনা'}</span>
                       </button>
+                    )}
 
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusedCalendarDate(meeting.date);
+                        setActiveNav('calendar');
+                      }}
+                      title="ক্যালেন্ডারে দেখুন"
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <CalendarDays className="w-3 h-3 text-emerald-700" />
+                      <span>ক্যালেন্ডার</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPrintMeeting(meeting)}
+                      title="প্রিন্ট"
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <Printer className="w-3 h-3" />
+                      <span>প্রিন্ট</span>
+                    </button>
+
+                    {canManageMeetings && (
                       <button
                         type="button"
-                        onClick={() => setPrintMeeting(meeting)}
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold cursor-pointer inline-flex items-center gap-1"
+                        onClick={() => setConfirmDeleteMtg(meeting)}
+                        title="মুছুন"
+                        className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 cursor-pointer"
                       >
-                        <Printer className="w-3 h-3" />
-                        <span>প্রিন্ট</span>
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
-
-                      {canManageMeetings && (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteMtg(meeting)}
-                          title="মুছুন"
-                          className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Participants & Attendance Summary */}
-                {(invitedList.length > 0 ||
-                  attendedList.length > 0 ||
-                  meeting.participants.length > 0) && (
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                {/* Attendees */}
+                {memberNames.length > 0 && (
+                  <div className="pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
                     <span className="font-bold text-slate-700 inline-flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5 text-purple-800" />
+                      <Users className="w-3.5 h-3.5 text-emerald-800" />
                       {attendedList.length > 0
-                        ? `উপস্থিত (${toBnDigits(attendedList.length)} জন):`
-                        : `আমন্ত্রিত (${toBnDigits(invitedList.length || meeting.participants.length)} জন):`}
+                        ? `উপস্থিত (${toBnDigits(attendedList.length)}):`
+                        : `আমন্ত্রিত (${toBnDigits(memberNames.length)}):`}
                     </span>
-
-                    <div className="flex flex-wrap gap-1.5">
-                      {(attendedList.length > 0
-                        ? attendedList.map(getEmployeeName)
-                        : invitedList.length > 0
-                        ? invitedList.map(getEmployeeName)
-                        : meeting.participants
-                      ).map((name, idx) => (
-                        <span
-                          key={`${name}-${idx}`}
-                          className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 text-[11px] font-medium"
-                        >
-                          {name}
-                        </span>
-                      ))}
-                    </div>
+                    <span className="text-slate-800">{memberNames.join(', ')}</span>
                   </div>
                 )}
 
-                {meeting.agenda.length > 0 && (
-                  <div className="p-3.5 bg-slate-50 rounded-lg text-xs space-y-1 border border-slate-100">
-                    <strong className="text-slate-800 block">আলোচ্যসূচি (Agenda):</strong>
-                    <ul className="list-disc list-inside text-slate-600 space-y-0.5">
-                      {meeting.agenda.map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
+                {/* Agenda & Notes */}
+                {(meeting.agenda.length > 0 || meeting.meetingNotes) && (
+                  <div className="pt-2.5 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    {meeting.agenda.length > 0 && (
+                      <div className="space-y-1">
+                        <strong className="text-slate-800 block">আলোচ্যসূচি:</strong>
+                        <ul className="list-disc list-inside text-slate-600 space-y-0.5">
+                          {meeting.agenda.map((item, i) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {meeting.meetingNotes && (
+                      <div className="space-y-1">
+                        <strong className="text-slate-800 block">সারসংক্ষেপ:</strong>
+                        <p className="text-slate-600 leading-relaxed whitespace-pre-line">
+                          {meeting.meetingNotes}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {meeting.meetingNotes && (
-                  <div className="text-xs text-slate-700">
-                    <strong className="text-slate-900 block mb-0.5">আলোচনার সারসংক্ষেপ:</strong>
-                    <p className="text-slate-600 leading-relaxed whitespace-pre-line">
-                      {meeting.meetingNotes}
-                    </p>
-                  </div>
-                )}
-
+                {/* Decisions */}
                 {meeting.finalDecisions.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-slate-100">
-                    <strong className="text-xs text-slate-800 block">
-                      গৃহীত সিদ্ধান্তসমূহ ({toBnDigits(meeting.finalDecisions.length)} টি):
+                  <div className="pt-2.5 border-t border-slate-100 space-y-1.5 text-xs">
+                    <strong className="text-slate-800 block">
+                      সিদ্ধান্ত ({toBnDigits(meeting.finalDecisions.length)}):
                     </strong>
-                    <div className="space-y-2">
-                      {meeting.finalDecisions.map((dec) => (
+                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg bg-slate-50/60">
+                      {meeting.finalDecisions.map((dec, idx) => (
                         <div
                           key={dec.id}
-                          className="p-3 bg-slate-50 rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                          className="px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5"
                         >
-                          <div>
-                            <div className="font-bold text-slate-900">{dec.decisionText}</div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              দায়িত্বপ্রাপ্ত: <strong>{dec.assignedEmployeeName}</strong> · ডেডলাইন:{' '}
-                              <span className="font-mono tabular-nums">{dec.deadline}</span>
-                            </div>
+                          <div className="font-semibold text-slate-900">
+                            {toBnDigits(idx + 1)}. {dec.decisionText}
                           </div>
-                          <span className="text-[11px] text-emerald-800 font-semibold flex items-center gap-1 shrink-0">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>ট্র্যাকারে যুক্ত</span>
-                          </span>
+                          <div className="text-[11px] text-slate-600 shrink-0 flex items-center gap-2">
+                            <span>{dec.assignedEmployeeName}</span>
+                            <span className="text-slate-300">·</span>
+                            <span className="font-mono tabular-nums">{dec.deadline}</span>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -757,20 +742,13 @@ export function MeetingManagement() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 border border-slate-200 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  {editingMeeting
-                    ? editingMeeting.meetingStatus === 'Scheduled'
-                      ? 'মিটিং মিনিটস ও সিদ্ধান্ত লিখুন'
-                      : 'মিটিং মিনিটস সম্পাদনা করুন'
-                    : 'নতুন মিটিং মিনিটস ও সিদ্ধান্ত সংরক্ষণ'}
-                </h3>
-                {editingMeeting && (
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    সভার উপস্থিতি যাচাই করুন, আলোচনার বিবরণ লিখুন এবং সিদ্ধান্তগুলো ট্র্যাকারে পাঠান।
-                  </p>
-                )}
-              </div>
+              <h3 className="text-base font-bold text-slate-900">
+                {editingMeeting
+                  ? editingMeeting.meetingStatus === 'Scheduled'
+                    ? 'মিনিটস ও সিদ্ধান্ত লিখুন'
+                    : 'মিনিটস সম্পাদনা'
+                  : 'নতুন মিটিং ও মিনিটস'}
+              </h3>
               <button
                 type="button"
                 onClick={() => setShowFormModal(false)}
@@ -780,7 +758,7 @@ export function MeetingManagement() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveMeetingForm} className="space-y-4 text-xs">
+            <form onSubmit={handleSaveMeetingForm} className="space-y-3.5 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">সভার শিরোনাম *</label>
                 <input
@@ -788,14 +766,14 @@ export function MeetingManagement() {
                   required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="যেমন: মাসিক একাডেমিক ও প্রশাসনিক পর্যালোচনা সভা"
+                  placeholder="সভার শিরোনাম লিখুন"
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-900"
                 />
               </div>
 
               {/* Department */}
-              <div className="space-y-1.5">
-                <label className="block font-bold text-slate-700">ডিপার্টমেন্ট / বিভাগ</label>
+              <div className="space-y-1">
+                <label className="block font-bold text-slate-700">বিভাগ</label>
                 <div className="flex flex-wrap gap-1.5">
                   {departmentOptions.map((dept) => (
                     <button
@@ -826,7 +804,7 @@ export function MeetingManagement() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">শুরুর সময়</label>
+                  <label className="block font-bold text-slate-700 mb-1">শুরু</label>
                   <input
                     type="time"
                     value={startTime}
@@ -835,7 +813,7 @@ export function MeetingManagement() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">শেষ সময়</label>
+                  <label className="block font-bold text-slate-700 mb-1">শেষ</label>
                   <input
                     type="time"
                     value={endTime}
@@ -865,7 +843,7 @@ export function MeetingManagement() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">সঞ্চালক / সচিব</label>
+                  <label className="block font-bold text-slate-700 mb-1">সঞ্চালক</label>
                   <input
                     type="text"
                     value={secretary}
@@ -880,10 +858,7 @@ export function MeetingManagement() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="font-bold text-slate-800 inline-flex items-center gap-1.5">
                     <Users className="w-3.5 h-3.5 text-emerald-800" />
-                    <span>সভায় উপস্থিত ব্যক্তিবর্গ চিহ্নিত করুন</span>
-                    <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 font-mono text-[10px]">
-                      {toBnDigits(actualAttendeeIds.length)} জন উপস্থিত
-                    </span>
+                    <span>উপস্থিত সদস্য ({toBnDigits(actualAttendeeIds.length)})</span>
                   </label>
                   <div className="flex items-center gap-1.5 text-[11px]">
                     {invitedIds.length > 0 && (
@@ -892,7 +867,7 @@ export function MeetingManagement() {
                         onClick={() => setActualAttendeeIds(invitedIds)}
                         className="px-2 py-1 rounded bg-white border border-purple-200 text-purple-900 font-semibold cursor-pointer"
                       >
-                        সব আমন্ত্রিত ({toBnDigits(invitedIds.length)})
+                        আমন্ত্রিত ({toBnDigits(invitedIds.length)})
                       </button>
                     )}
                     <button
@@ -900,7 +875,7 @@ export function MeetingManagement() {
                       onClick={() => setActualAttendeeIds(employees.map((e) => e.id))}
                       className="px-2 py-1 rounded bg-white border border-slate-300 text-slate-700 font-semibold cursor-pointer"
                     >
-                      সকল স্টাফ
+                      সবাই
                     </button>
                     {actualAttendeeIds.length > 0 && (
                       <button
@@ -920,7 +895,7 @@ export function MeetingManagement() {
                     type="text"
                     value={attendeeSearch}
                     onChange={(e) => setAttendeeSearch(e.target.value)}
-                    placeholder="শিক্ষক বা স্টাফের নাম দিয়ে খুঁজুন..."
+                    placeholder="নাম খুঁজুন..."
                     className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
                   />
                 </div>
@@ -974,18 +949,18 @@ export function MeetingManagement() {
                   rows={2}
                   value={agendaText}
                   onChange={(e) => setAgendaText(e.target.value)}
-                  placeholder="সভার আলোচ্য বিষয়গুলো লিখুন..."
+                  placeholder="আলোচ্য বিষয়..."
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-900"
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">আলোচনার সারসংক্ষেপ / মিটিং নোটস *</label>
+                <label className="block font-bold text-slate-700 mb-1">আলোচনার সারসংক্ষেপ *</label>
                 <textarea
                   rows={3}
                   value={meetingNotes}
                   onChange={(e) => setMeetingNotes(e.target.value)}
-                  placeholder="সভায় আলোচিত গুরুত্বপূর্ণ বিষয় ও মতামতের সারসংক্ষেপ লিখুন..."
+                  placeholder="আলোচনার সারসংক্ষেপ লিখুন..."
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-900"
                 />
               </div>
@@ -993,18 +968,18 @@ export function MeetingManagement() {
               {/* Decisions */}
               <div className="space-y-2 pt-2 border-t border-slate-100">
                 <div className="flex items-center justify-between">
-                  <label className="font-bold text-slate-800">গৃহীত সিদ্ধান্ত ও দায়িত্ব অর্পণ (সিদ্ধান্ত ট্র্যাকারে যুক্ত হবে)</label>
+                  <label className="font-bold text-slate-800">গৃহীত সিদ্ধান্ত ও দায়িত্ব</label>
                   <button
                     type="button"
                     onClick={handleAddDecisionRow}
                     className="text-emerald-800 hover:underline font-bold cursor-pointer"
                   >
-                    + আরও সিদ্ধান্ত যোগ করুন
+                    + সিদ্ধান্ত যোগ
                   </button>
                 </div>
 
                 {decisionsList.map((d, index) => (
-                  <div key={index} className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+                  <div key={index} className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
@@ -1014,7 +989,7 @@ export function MeetingManagement() {
                           copy[index] = { ...copy[index], decisionText: e.target.value };
                           setDecisionsList(copy);
                         }}
-                        placeholder="সিদ্ধান্তের বিবরণ লিখুন..."
+                        placeholder="সিদ্ধান্ত লিখুন..."
                         className="flex-1 px-3 py-1.5 rounded border border-slate-300 bg-white text-slate-900"
                       />
                       {decisionsList.length > 1 && (
@@ -1043,7 +1018,7 @@ export function MeetingManagement() {
                         }}
                         className="w-full px-3 py-1.5 rounded border border-slate-300 bg-white text-slate-900"
                       >
-                        <option value="">দায়িত্বপ্রাপ্ত ব্যক্তি নির্বাচন করুন...</option>
+                        <option value="">দায়িত্বপ্রাপ্ত নির্বাচন...</option>
                         {employees.map((emp) => (
                           <option key={emp.id} value={emp.id}>
                             {emp.nameBn || emp.name} ({emp.department})
@@ -1078,7 +1053,7 @@ export function MeetingManagement() {
                   type="submit"
                   className="px-5 py-2 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white font-semibold cursor-pointer"
                 >
-                  {editingMeeting ? 'মিটিং মিনিটস সংরক্ষণ করুন' : 'সংরক্ষণ করুন'}
+                  সংরক্ষণ করুন
                 </button>
               </div>
             </form>
@@ -1095,9 +1070,7 @@ export function MeetingManagement() {
                 <div className="text-xs font-bold text-emerald-900">
                   আস-সুন্নাহ দাওয়াহ অ্যান্ড রিসার্চ ইনস্টিটিউট (ASDRI)
                 </div>
-                <h3 className="text-lg font-bold text-slate-900 mt-0.5">
-                  সভার কার্যবিবরণী ও রেজোলিউশন
-                </h3>
+                <h3 className="text-lg font-bold text-slate-900 mt-0.5">সভার কার্যবিবরণী</h3>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1106,7 +1079,7 @@ export function MeetingManagement() {
                   className="px-3 py-1.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  <span>প্রিন্ট করুন</span>
+                  <span>প্রিন্ট</span>
                 </button>
                 <button
                   type="button"
@@ -1138,7 +1111,7 @@ export function MeetingManagement() {
                     </strong>
                   </div>
                   <div>
-                    ডিপার্টমেন্ট: <strong className="text-slate-900">{printMeeting.department || 'প্রশাসন'}</strong>
+                    বিভাগ: <strong className="text-slate-900">{printMeeting.department || 'প্রশাসন'}</strong>
                   </div>
                   <div>
                     স্থান: <strong className="text-slate-900">{printMeeting.venue}</strong>
@@ -1148,7 +1121,7 @@ export function MeetingManagement() {
                   </div>
                   {printMeeting.secretary && (
                     <div>
-                      সঞ্চালক/সচিব: <strong className="text-slate-900">{printMeeting.secretary}</strong>
+                      সঞ্চালক: <strong className="text-slate-900">{printMeeting.secretary}</strong>
                     </div>
                   )}
                 </div>
@@ -1175,7 +1148,7 @@ export function MeetingManagement() {
 
               {printMeeting.agenda.length > 0 && (
                 <div>
-                  <h4 className="font-bold text-slate-900 mb-1">আলোচ্যসূচি (Agenda):</h4>
+                  <h4 className="font-bold text-slate-900 mb-1">আলোচ্যসূচি:</h4>
                   <ol className="list-decimal list-inside space-y-1 text-slate-700">
                     {printMeeting.agenda.map((a, idx) => (
                       <li key={idx}>{a}</li>
@@ -1186,7 +1159,7 @@ export function MeetingManagement() {
 
               {printMeeting.meetingNotes && (
                 <div>
-                  <h4 className="font-bold text-slate-900 mb-1">আলোচনার বিবরণ ও সারসংক্ষেপ:</h4>
+                  <h4 className="font-bold text-slate-900 mb-1">সারসংক্ষেপ:</h4>
                   <p className="p-3 rounded-lg border border-slate-200 bg-white leading-relaxed whitespace-pre-line">
                     {printMeeting.meetingNotes}
                   </p>
@@ -1195,7 +1168,7 @@ export function MeetingManagement() {
 
               {printMeeting.finalDecisions.length > 0 && (
                 <div>
-                  <h4 className="font-bold text-slate-900 mb-1.5">গৃহীত সিদ্ধান্তসমূহ:</h4>
+                  <h4 className="font-bold text-slate-900 mb-1.5">গৃহীত সিদ্ধান্ত:</h4>
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[460px] text-left border border-slate-200 rounded-lg overflow-hidden">
                       <thead className="bg-slate-100 text-slate-800 font-bold">
@@ -1228,15 +1201,15 @@ export function MeetingManagement() {
       {/* CONFIRM DELETE MEETING MODAL */}
       {confirmDeleteMtg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 border border-slate-200 shadow-xl space-y-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 border border-slate-200 shadow-xl space-y-4">
             <div className="flex items-start gap-3">
-              <div className="p-2.5 rounded-xl bg-rose-50 text-rose-700 shrink-0">
+              <div className="p-2 rounded-xl bg-rose-50 text-rose-700 shrink-0">
                 <AlertTriangle className="w-5 h-5" />
               </div>
               <div className="space-y-1">
-                <h3 className="text-base font-bold text-slate-900">মিটিং ও মিনিটস মুছে ফেলবেন?</h3>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  আপনি কি নিশ্চিত যে <strong>&ldquo;{confirmDeleteMtg.title}&rdquo;</strong> ({confirmDeleteMtg.date}) মুছে ফেলতে চান? ক্যালেন্ডারের সাথে যুক্ত থাকলে সেখান থেকেও মিটিংটি মুছে যাবে।
+                <h3 className="text-base font-bold text-slate-900">মিটিং মুছে ফেলবেন?</h3>
+                <p className="text-xs text-slate-600">
+                  <strong>&ldquo;{confirmDeleteMtg.title}&rdquo;</strong> ({confirmDeleteMtg.date}) মুছে ফেলা হবে।
                 </p>
               </div>
             </div>
@@ -1257,7 +1230,7 @@ export function MeetingManagement() {
                 }}
                 className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-semibold cursor-pointer"
               >
-                হ্যাঁ, মুছে ফেলুন
+                মুছে ফেলুন
               </button>
             </div>
           </div>

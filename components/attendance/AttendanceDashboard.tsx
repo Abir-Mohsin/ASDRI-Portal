@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp, getDhakaDateTime } from '@/lib/store';
 import { AttendanceStatus, Employee, isAdministrativeRole } from '@/lib/types';
-import { getDayOperationalStatus } from '@/lib/calendar-utils';
+import { getDayOperationalStatus, enumerateDateRange, toBnDigits } from '@/lib/calendar-utils';
 import { QrPunchScannerModal, useQrCameraPunch } from '@/components/attendance/QrPunchScannerModal';
 import { ZkTecoMachinePanel } from '@/components/attendance/ZkTecoMachinePanel';
 import QRCode from 'qrcode';
@@ -75,6 +75,8 @@ export function AttendanceDashboard() {
     rejectCorrectionRequest,
     updatePolicy,
     calendarEvents,
+    createCalendarEventsBatch,
+    deleteCalendarEvent,
     ingestZkMachinePunches,
   } = useApp();
 
@@ -82,7 +84,9 @@ export function AttendanceDashboard() {
 
   // Main View Mode: 'personal' vs 'admin' vs 'office_qr'
   const [requestedMainView, setRequestedMainView] = useState<'personal' | 'admin' | 'office_qr'>('personal');
-  const [adminTab, setAdminTab] = useState<'daily' | 'monthly' | 'corrections' | 'policy' | 'audit' | 'zkteco'>('daily');
+  const [adminTab, setAdminTab] = useState<
+    'daily' | 'monthly' | 'corrections' | 'policy' | 'audit' | 'zkteco'
+  >('daily');
 
   // Enforce role security: Only Admins and Super Admins can access 'office_qr' or 'admin' views
   const mainView: 'personal' | 'admin' | 'office_qr' = useMemo(() => {
@@ -217,11 +221,6 @@ export function AttendanceDashboard() {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
   const fetchDynamicQr = useCallback(async () => {
-    if (!isAdmin) {
-      setServerQr(null);
-      setQrDataUrl('');
-      return;
-    }
     try {
       const rot = policy.qrRotationSeconds || 30;
       const res = await fetch(`/api/attendance?rotationSeconds=${rot}`, { cache: 'no-store' });
@@ -252,10 +251,9 @@ export function AttendanceDashboard() {
     } catch {
       // Offline or transient error
     }
-  }, [isAdmin, policy.qrRotationSeconds]);
+  }, [policy.qrRotationSeconds]);
 
   useEffect(() => {
-    if (!isAdmin || mainView !== 'office_qr') return;
     const initTimer = setTimeout(() => {
       fetchDynamicQr();
     }, 0);
@@ -264,7 +262,7 @@ export function AttendanceDashboard() {
       clearTimeout(initTimer);
       clearInterval(interval);
     };
-  }, [isAdmin, mainView, fetchDynamicQr]);
+  }, [fetchDynamicQr]);
 
   // Punch Execution Feedback
   const [punchFeedback, setPunchFeedback] = useState<{
@@ -577,30 +575,93 @@ export function AttendanceDashboard() {
     setEditingTarget(null);
   };
 
-  // Special Holiday / Working Day Input State
-  const [newSpecialDate, setNewSpecialDate] = useState<string>('');
-  const [newSpecialTitle, setNewSpecialTitle] = useState<string>('');
-  const [newSpecialType, setNewSpecialType] = useState<'Holiday' | 'Special_Working_Day'>('Holiday');
+  // Multi-Row Special Holiday / Working Day Range Input State
+  const [specialDayRows, setSpecialDayRows] = useState<
+    Array<{
+      title: string;
+      startDate: string;
+      endDate: string;
+      type: 'Holiday' | 'Special_Working_Day';
+    }>
+  >([{ title: '', startDate: '', endDate: '', type: 'Holiday' }]);
 
   const handleAddSpecialDay = () => {
-    if (!newSpecialDate || !newSpecialTitle.trim()) return;
-    const currentList = policy.specialDays || [];
-    updatePolicy({
-      specialDays: [
-        ...currentList.filter((d) => d.date !== newSpecialDate),
-        { date: newSpecialDate, title: newSpecialTitle.trim(), type: newSpecialType },
-      ],
-    });
-    setNewSpecialDate('');
-    setNewSpecialTitle('');
+    const validRows = specialDayRows.filter((r) => r.startDate && r.title.trim());
+    if (validRows.length === 0) return;
+
+    // Sync via CalendarEventsBatch so both Annual Calendar and Attendance Policy stay unified
+    createCalendarEventsBatch(
+      validRows.map((r) => {
+        const finalEnd = r.endDate && r.endDate >= r.startDate ? r.endDate : r.startDate;
+        return {
+          title: r.title.trim(),
+          startDate: r.startDate,
+          endDate: finalEnd,
+          type: r.type,
+          category: r.type,
+          visibility: 'All' as const,
+          createdBy: currentUser.id,
+        };
+      })
+    );
+
+    setSpecialDayRows([{ title: '', startDate: '', endDate: '', type: 'Holiday' }]);
   };
 
-  const handleRemoveSpecialDay = (dateToRemove: string) => {
+  const handleRemoveSpecialDayGroup = (datesToRemove: string[], calendarEventId?: string) => {
+    if (calendarEventId) {
+      deleteCalendarEvent(calendarEventId);
+      return;
+    }
+    const removeSet = new Set(datesToRemove);
     const currentList = policy.specialDays || [];
     updatePolicy({
-      specialDays: currentList.filter((d) => d.date !== dateToRemove),
+      specialDays: currentList.filter((d) => !removeSet.has(d.date)),
     });
   };
+
+  const groupedSpecialDays = useMemo(() => {
+    const list = [...(policy.specialDays || [])].sort((a, b) => a.date.localeCompare(b.date));
+    const groups: Array<{
+      key: string;
+      title: string;
+      type: 'Holiday' | 'Working_Day' | 'Special_Working_Day';
+      startDate: string;
+      endDate: string;
+      dates: string[];
+      calendarEventId?: string;
+    }> = [];
+
+    for (const item of list) {
+      const calId = item.id?.startsWith('CAL-') ? item.id.replace(/^CAL-/, '') : undefined;
+      const last = groups[groups.length - 1];
+      if (
+        last &&
+        last.title === item.title &&
+        last.type === item.type &&
+        last.calendarEventId === calId
+      ) {
+        const prevDate = new Date(`${last.endDate}T00:00:00`);
+        prevDate.setDate(prevDate.getDate() + 1);
+        const expectedNext = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(prevDate.getDate()).padStart(2, '0')}`;
+        if (item.date === expectedNext || (calId && last.calendarEventId === calId)) {
+          if (item.date > last.endDate) last.endDate = item.date;
+          if (!last.dates.includes(item.date)) last.dates.push(item.date);
+          continue;
+        }
+      }
+      groups.push({
+        key: `${item.date}-${item.id || item.title}`,
+        title: item.title,
+        type: item.type,
+        startDate: item.date,
+        endDate: item.date,
+        dates: [item.date],
+        calendarEventId: calId,
+      });
+    }
+    return groups;
+  }, [policy.specialDays]);
 
   const handleDownloadMonthlyCsv = () => {
     const headers = ['Employee ID', 'Name', 'Designation', 'Department', 'Present Days', 'Late Entry', 'Early Exit', 'Approved Leave Days', 'Total Working Hours'];
@@ -730,8 +791,8 @@ export function AttendanceDashboard() {
         </div>
       )}
 
-      {/* VIEW 1: OFFICE DYNAMIC QR BOARD (Admins & Super Admins Only) */}
-      {isAdmin && mainView === 'office_qr' && (
+      {/* VIEW 1: OFFICE DYNAMIC QR BOARD (Admins Only) */}
+      {mainView === 'office_qr' && (
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 sm:p-8 shadow-2xs max-w-xl mx-auto text-center space-y-5">
           <div className="space-y-1">
             <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
@@ -1767,67 +1828,196 @@ export function AttendanceDashboard() {
                 </div>
 
                 <div className="space-y-3">
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                    বিশেষ কর্মদিবস ও সরকারি/বিশেষ ছুটির দিন সংযোজন
-                  </h4>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="date"
-                      value={newSpecialDate}
-                      onChange={(e) => setNewSpecialDate(e.target.value)}
-                      className="px-3 py-2 rounded-lg border border-slate-300 text-xs"
-                    />
-                    <input
-                      type="text"
-                      value={newSpecialTitle}
-                      onChange={(e) => setNewSpecialTitle(e.target.value)}
-                      placeholder="দিবসের বিবরণ (যেমন: ঈদুল ফিতর ছুটি / বিশেষ সেমিনার কর্মদিবস)"
-                      className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-xs"
-                    />
-                    <select
-                      value={newSpecialType}
-                      onChange={(e) => setNewSpecialType(e.target.value as 'Holiday' | 'Special_Working_Day')}
-                      className="px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold"
-                    >
-                      <option value="Holiday">বিশেষ ছুটির দিন (Holiday)</option>
-                      <option value="Special_Working_Day">বিশেষ কর্মদিবস (Working Day)</option>
-                    </select>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                        বিশেষ কর্মদিবস ও সরকারি/বিশেষ ছুটির দিন সংযোজন (একক বা একাধিক তারিখ রেঞ্জ)
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        শুরুর ও শেষ তারিখ সিলেক্ট করে একসাথে পুরো ছুটির রেঞ্জ বা একাধিক সারি যুক্ত করুন (বার্ষিক ক্যালেন্ডারেও স্বয়ংক্রিয়ভাবে যুক্ত হবে)
+                      </p>
+                    </div>
                     <button
                       type="button"
-                      onClick={handleAddSpecialDay}
-                      className="px-4 py-2 rounded-lg bg-[#0f4c3a] text-white text-xs font-bold flex items-center gap-1"
+                      onClick={() =>
+                        setSpecialDayRows((prev) => [
+                          ...prev,
+                          { title: '', startDate: '', endDate: '', type: 'Holiday' },
+                        ])
+                      }
+                      className="px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 text-xs font-bold flex items-center gap-1 transition-colors"
                     >
-                      <Plus className="w-3.5 h-3.5" /> যুক্ত করুন
+                      <Plus className="w-3.5 h-3.5" /> আরও সারি যোগ
                     </button>
                   </div>
 
-                  {policy.specialDays && policy.specialDays.length > 0 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {policy.specialDays.map((sd) => {
-                        const isFromCalendar = Boolean(sd.id?.startsWith('CAL-'));
-                        return (
-                          <div
-                            key={`${sd.date}-${sd.id || sd.title}`}
-                            className="p-2.5 rounded-lg border border-slate-200 flex items-center justify-between text-xs"
-                          >
-                            <div>
-                              <span className="font-mono font-bold mr-2">{sd.date}</span>
-                              <span className="font-semibold">{sd.title}</span>{' '}
-                              <span className="px-2 py-0.5 rounded bg-slate-100 text-[10px] font-bold ml-1">
-                                {sd.type === 'Holiday' ? 'ছুটির দিন' : 'বিশেষ কর্মদিবস'}
-                              </span>
-                              {isFromCalendar && (
-                                <span className="ml-1 text-[10px] text-emerald-700">(বার্ষিক ক্যালেন্ডার)</span>
+                  <div className="space-y-2.5">
+                    {specialDayRows.map((row, idx) => {
+                      const effectiveEnd =
+                        row.endDate && row.endDate >= row.startDate ? row.endDate : row.startDate;
+                      const dayCount = row.startDate
+                        ? enumerateDateRange(row.startDate, effectiveEnd).length
+                        : 0;
+                      return (
+                        <div
+                          key={idx}
+                          className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-2"
+                        >
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                            <div className="sm:col-span-4">
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                                দিবসের বিবরণ *
+                              </label>
+                              <input
+                                type="text"
+                                value={row.title}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setSpecialDayRows((prev) =>
+                                    prev.map((r, i) => (i === idx ? { ...r, title: val } : r))
+                                  );
+                                }}
+                                placeholder="যেমন: পবিত্র ঈদুল ফিতর ছুটি"
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                                শুরুর তারিখ (থেকে) *
+                              </label>
+                              <input
+                                type="date"
+                                value={row.startDate}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setSpecialDayRows((prev) =>
+                                    prev.map((r, i) =>
+                                      i === idx
+                                        ? {
+                                            ...r,
+                                            startDate: val,
+                                            endDate: !r.endDate || r.endDate < val ? val : r.endDate,
+                                          }
+                                        : r
+                                    )
+                                  );
+                                }}
+                                className="w-full px-2.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                                শেষ তারিখ (পর্যন্ত) *
+                              </label>
+                              <input
+                                type="date"
+                                min={row.startDate || undefined}
+                                value={row.endDate}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setSpecialDayRows((prev) =>
+                                    prev.map((r, i) => (i === idx ? { ...r, endDate: val } : r))
+                                  );
+                                }}
+                                className="w-full px-2.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                              />
+                            </div>
+                            <div className="sm:col-span-3">
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                                ধরন
+                              </label>
+                              <select
+                                value={row.type}
+                                onChange={(e) => {
+                                  const val = e.target.value as 'Holiday' | 'Special_Working_Day';
+                                  setSpecialDayRows((prev) =>
+                                    prev.map((r, i) => (i === idx ? { ...r, type: val } : r))
+                                  );
+                                }}
+                                className="w-full px-2.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+                              >
+                                <option value="Holiday">বিশেষ ছুটির দিন (Holiday)</option>
+                                <option value="Special_Working_Day">বিশেষ কর্মদিবস (Working Day)</option>
+                              </select>
+                            </div>
+                            <div className="sm:col-span-1 flex items-center justify-end gap-1.5">
+                              {dayCount > 0 && (
+                                <span className="px-2 py-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-300 text-[11px] font-bold whitespace-nowrap">
+                                  {toBnDigits(dayCount)} দিন
+                                </span>
+                              )}
+                              {specialDayRows.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setSpecialDayRows((prev) => prev.filter((_, i) => i !== idx))
+                                  }
+                                  className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                                  title="সারি মুছুন"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               )}
                             </div>
-                            {!isFromCalendar && (
-                              <button
-                                onClick={() => handleRemoveSpecialDay(sd.date)}
-                                className="text-rose-600 hover:text-rose-800"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleAddSpecialDay}
+                      className="px-4 py-2 rounded-lg bg-[#0f4c3a] hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> ছুটি / কর্মদিবস যুক্ত করুন
+                    </button>
+                  </div>
+
+                  {groupedSpecialDays.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                      {groupedSpecialDays.map((group) => {
+                        const totalDays = group.dates.length;
+                        return (
+                          <div
+                            key={group.key}
+                            className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                                  {group.startDate === group.endDate
+                                    ? group.startDate
+                                    : `${group.startDate} → ${group.endDate}`}
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold">
+                                  {toBnDigits(totalDays)} দিন
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    group.type === 'Holiday'
+                                      ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'
+                                      : 'bg-teal-50 text-teal-700 dark:bg-teal-950/50 dark:text-teal-300'
+                                  }`}
+                                >
+                                  {group.type === 'Holiday' ? 'ছুটির দিন' : 'বিশেষ কর্মদিবস'}
+                                </span>
+                              </div>
+                              <p className="font-semibold text-slate-900 dark:text-white mt-0.5 truncate">
+                                {group.title}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleRemoveSpecialDayGroup(group.dates, group.calendarEventId)
+                              }
+                              className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 shrink-0"
+                              title="মুছে ফেলুন"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         );
                       })}
@@ -1897,7 +2087,6 @@ export function AttendanceDashboard() {
             </div>
           )}
 
-          {/* ADMIN TAB 6: ZKTECO F09 BIOMETRIC ADMS MACHINE INTEGRATION */}
           {adminTab === 'zkteco' && <ZkTecoMachinePanel />}
         </div>
       )}

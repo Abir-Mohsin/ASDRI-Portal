@@ -1,73 +1,73 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import { useApp } from '@/lib/store';
-import { DEFAULT_INSTITUTION_LOGO } from '@/lib/initial-data';
+import { resolveInstitutionLogo } from '@/lib/initial-data';
 import {
-  isAdministrativeRole,
-  isDepartmentLeader,
-  getRoleLabel,
-} from '@/lib/types';
-import {
-  LayoutDashboard,
-  CalendarCheck,
-  CheckSquare,
-  FileText,
-  Users,
-  LogOut,
-  Calendar,
-  CalendarDays,
   Bell,
-  Check,
+  Calendar,
+  CheckCheck,
+  Clock,
+  FileText,
   ImagePlus,
-  Upload,
+  LayoutDashboard,
+  ListChecks,
+  LogOut,
+  Menu,
   Trash2,
+  Upload,
+  Users,
+  Video,
   X,
 } from 'lucide-react';
+import { getRoleLabel, isAdministrativeRole } from '@/lib/types';
 
 export function Header() {
   const {
     currentUser,
     activeNav,
     setActiveNav,
-    logout,
     notifications,
     markNotificationAsRead,
     markAllNotificationsAsRead,
+    setFocusedMeetingId,
+    logout,
     policy,
     updatePolicy,
   } = useApp();
 
-  const role = currentUser.role;
-  const isAdmin = isAdministrativeRole(role);
-  const isLeader = isDepartmentLeader(role);
-  const activeLogoUrl = policy.institutionLogoUrl || DEFAULT_INSTITUTION_LOGO;
-
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showLogoModal, setShowLogoModal] = useState(false);
-  const [logoUrlInput, setLogoUrlInput] = useState('');
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  const [logoUrlInput, setLogoUrlInput] = useState(
+    resolveInstitutionLogo(policy.institutionLogoUrl)
+  );
   const [logoError, setLogoError] = useState<string | null>(null);
-  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
+
+  const isAdmin = isAdministrativeRole(currentUser.role);
+  const activeLogoUrl = resolveInstitutionLogo(policy.institutionLogoUrl);
+
+  const openLogoModal = () => {
+    setLogoUrlInput(resolveInstitutionLogo(policy.institutionLogoUrl));
+    setLogoError(null);
+    setShowLogoModal(true);
+  };
 
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setLogoError(null);
-
-    if (!file.type.startsWith('image/')) {
-      setLogoError('অনুগ্রহ করে একটি সঠিক ছবি ফাইল (PNG, JPG, SVG বা WebP) নির্বাচন করুন।');
-      return;
-    }
-
     const reader = new FileReader();
     reader.onload = () => {
-      const resultStr = typeof reader.result === 'string' ? reader.result : '';
-      if (!resultStr) return;
-
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) return;
       const img = new window.Image();
       img.onload = () => {
-        const maxDim = 180;
-        let w = img.width || 180;
-        let h = img.height || 180;
+        const canvas = document.createElement('canvas');
+        const maxDim = 220;
+        let w = img.width || 160;
+        let h = img.height || 160;
         if (w > maxDim || h > maxDim) {
           if (w > h) {
             h = Math.round((h * maxDim) / w);
@@ -77,293 +77,360 @@ export function Header() {
             h = maxDim;
           }
         }
-        const canvas = document.createElement('canvas');
         canvas.width = w;
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.clearRect(0, 0, w, h);
           ctx.drawImage(img, 0, 0, w, h);
-          const compressedDataUrl = canvas.toDataURL('image/png', 0.92);
-          setLogoUrlInput(compressedDataUrl);
+          const compressed = canvas.toDataURL('image/png', 0.9);
+          setLogoUrlInput(compressed);
         } else {
-          setLogoUrlInput(resultStr);
+          setLogoUrlInput(dataUrl);
         }
       };
       img.onerror = () => {
-        setLogoUrlInput(resultStr);
+        setLogoError('সঠিক ছবির ফাইল (PNG, JPG, SVG বা WEBP) নির্বাচন করুন।');
       };
-      img.src = resultStr;
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
   };
 
   const handleSaveLogo = (e: React.FormEvent) => {
     e.preventDefault();
-    updatePolicy({ institutionLogoUrl: logoUrlInput.trim() || DEFAULT_INSTITUTION_LOGO });
+    updatePolicy({
+      institutionLogoUrl: logoUrlInput.trim(),
+    });
     setShowLogoModal(false);
   };
 
-  // Notifications for the current user
-  const myNotifications = notifications.filter((n) => n.recipientEmployeeId === currentUser.id);
+  const myNotifications = notifications.filter(
+    (n) => n.recipientEmployeeId === currentUser.id
+  );
   const unreadCount = myNotifications.filter((n) => !n.isRead).length;
-  const [showNotifications, setShowNotifications] = useState(false);
-  const notifRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
-        setShowNotifications(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Scoped Navigation Tabs
   const navItems = [
-    {
-      id: 'workspace',
-      label: isAdmin ? 'ড্যাশবোর্ড' : 'আমার ড্যাশবোর্ড',
-      icon: LayoutDashboard,
-      show: true,
-    },
-    {
-      id: 'action-tracker',
-      label: isAdmin || isLeader ? 'সিদ্ধান্ত ও কাজ' : 'আমার কাজ ও জমা',
-      icon: CheckSquare,
-      show: true,
-    },
-    {
-      id: 'meetings',
-      label: 'মিটিং মিনিটস',
-      icon: FileText,
-      show: isAdmin || isLeader,
-    },
-    {
-      id: 'attendance',
-      label: 'উপস্থিতি',
-      icon: CalendarCheck,
-      show: true,
-    },
-    {
-      id: 'leaves',
-      label: 'ছুটি',
-      icon: Calendar,
-      show: true,
-    },
-    {
-      id: 'calendar',
-      label: 'বার্ষিক ক্যালেন্ডার',
-      icon: CalendarDays,
-      show: true,
-    },
-    {
-      id: 'employees',
-      label: 'শিক্ষক ও স্টাফ',
-      icon: Users,
-      show: isAdmin,
-    },
-  ].filter((item) => item.show);
+    { id: 'workspace', label: 'ড্যাশবোর্ড', icon: LayoutDashboard },
+    { id: 'action-tracker', label: 'সিদ্ধান্ত ও কাজ ট্র্যাকার', icon: ListChecks },
+    { id: 'meetings', label: 'মিটিং ও কার্যবিবরণী', icon: Video },
+    { id: 'attendance', label: 'উপস্থিতি ও পাঞ্চ', icon: Clock },
+    { id: 'leaves', label: 'ছুটি ব্যবস্থাপনা', icon: FileText },
+    { id: 'calendar', label: 'বার্ষিক ক্যালেন্ডার', icon: Calendar },
+    ...(isAdministrativeRole(currentUser.role)
+      ? [{ id: 'employees', label: 'শিক্ষক ও স্টাফ', icon: Users }]
+      : []),
+  ] as const;
+
+  const handleNotificationClick = (notifId: string, linkType: string, linkId?: string) => {
+    markNotificationAsRead(notifId);
+    setShowNotifDropdown(false);
+    if (linkType === 'tracker') {
+      setActiveNav('action-tracker');
+    } else if (linkType === 'meeting') {
+      if (linkId) setFocusedMeetingId(linkId);
+      setActiveNav('meetings');
+    } else if (linkType === 'leave') {
+      setActiveNav('leaves');
+    } else if (linkType === 'task') {
+      setActiveNav('workspace');
+    }
+  };
 
   return (
-    <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-2xs font-serif">
-      <div className="h-1 bg-emerald-900" />
-
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between gap-2 sm:gap-3 h-14 sm:h-15">
-          {/* Brand + Compact Desktop Navigation Grouped Together */}
-          <div className="flex items-center gap-2 lg:gap-4 min-w-0">
-            <div className="flex items-center gap-1 min-w-0 shrink">
+    <>
+      <header className="sticky top-0 z-30 bg-emerald-950 text-white border-b border-emerald-900 shadow-xs">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          {/* Top Bar */}
+          <div className="flex items-center justify-between h-14 sm:h-16 gap-2">
+            {/* Mobile Left: Hamburger Button + Logo + Compact Name */}
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <button
-                onClick={() => setActiveNav('workspace')}
-                className="text-left flex items-center gap-2 cursor-pointer min-w-0 shrink focus:outline-none"
+                type="button"
+                onClick={() => setShowMobileSidebar(true)}
+                aria-label="মেনু খুলুন"
+                className="md:hidden p-2 -ml-1 rounded-lg bg-emerald-900/80 hover:bg-emerald-800 text-amber-300 border border-emerald-800 transition-colors cursor-pointer shrink-0"
               >
-                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-white border border-slate-200 p-0.5 flex items-center justify-center overflow-hidden shrink-0">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={activeLogoUrl}
-                    alt="ASDRI Logo"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-                <div className="min-w-0">
-                  <span className="text-sm sm:text-base font-bold text-slate-900 block leading-tight truncate">
-                    ASDRI Portal
-                  </span>
-                  <span className="hidden lg:block text-[10px] text-slate-500 leading-tight truncate">
-                    আস-সুন্নাহ দাওয়াহ অ্যান্ড রিসার্চ ইনস্টিটিউট
-                  </span>
-                </div>
+                <Menu className="w-5 h-5" />
               </button>
 
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLogoUrlInput(activeLogoUrl);
-                    setLogoError(null);
-                    setShowLogoModal(true);
-                  }}
-                  title="প্রতিষ্ঠানের লোগো যুক্ত বা পরিবর্তন করুন"
-                  className="p-1 rounded-md text-slate-400 hover:text-emerald-800 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
-                >
-                  <ImagePlus className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            <div className="hidden md:block h-5 w-px bg-slate-200 shrink-0" />
-
-            {/* Direct Navigation (Desktop) - Compact spacing */}
-            <nav className="hidden md:flex items-center gap-0.5 bg-slate-50/80 p-1 rounded-xl border border-slate-200/80">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive =
-                  activeNav === item.id || (item.id === 'calendar' && activeNav === 'calendar-policy');
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => setActiveNav(item.id)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                      isActive
-                        ? 'bg-emerald-900 text-white shadow-2xs'
-                        : 'text-slate-700 hover:bg-slate-200/60'
-                    }`}
-                  >
-                    <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-amber-300' : 'text-emerald-800'}`} />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-
-          {/* Right Controls: Notification + Logged-in User Display + Logout */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Notification Bell */}
-            <div ref={notifRef} className="relative">
-              <button
-                onClick={() => setShowNotifications(!showNotifications)}
-                title="নোটিফিকেশন"
-                className="relative p-2 text-slate-600 hover:text-emerald-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-              >
-                <Bell className="w-4 h-4" />
-                {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 flex h-4 min-w-4 px-1 items-center justify-center text-[9px] font-bold font-mono text-white bg-amber-600 rounded-full">
-                    {unreadCount}
-                  </span>
+              <div className="relative group shrink-0">
+                {activeLogoUrl ? (
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white p-1 border border-amber-400/50 flex items-center justify-center overflow-hidden shadow-2xs">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={activeLogoUrl}
+                      alt="Institution Logo"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-900 border border-amber-500/40 flex items-center justify-center text-amber-400 font-bold text-base sm:text-lg">
+                    আ
+                  </div>
                 )}
-              </button>
-
-              {showNotifications && (
-                <div className="fixed inset-x-3 top-16 sm:inset-x-auto sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-96 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50 text-xs">
-                  <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100">
-                    <span className="font-bold text-slate-900">নোটিফিকেশন ({unreadCount} নতুন)</span>
-                    {unreadCount > 0 && (
-                      <button
-                        onClick={() => markAllNotificationsAsRead(currentUser.id)}
-                        className="text-[11px] text-emerald-700 hover:underline flex items-center gap-1 cursor-pointer font-semibold"
-                      >
-                        <Check className="w-3 h-3" />
-                        <span>সব পঠিত</span>
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                    {myNotifications.length === 0 ? (
-                      <div className="py-6 text-center text-slate-400">
-                        কোনো নতুন বিজ্ঞপ্তি নেই।
-                      </div>
-                    ) : (
-                      myNotifications.map((notif) => (
-                        <div
-                          key={notif.id}
-                          onClick={() => {
-                            markNotificationAsRead(notif.id);
-                            setShowNotifications(false);
-                            setActiveNav('action-tracker');
-                          }}
-                          className={`p-3 hover:bg-slate-50 transition-colors cursor-pointer flex items-start gap-2.5 ${
-                            !notif.isRead ? 'bg-amber-50/40' : ''
-                          }`}
-                        >
-                          <div
-                            className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                              !notif.isRead ? 'bg-amber-500' : 'bg-transparent'
-                            }`}
-                          />
-                          <div className="flex-1 space-y-0.5">
-                            <div className="font-semibold text-slate-900">{notif.title}</div>
-                            <p className="text-[11px] text-slate-600 leading-relaxed">{notif.message}</p>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Static Logged-in User Badge */}
-            <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-slate-50 rounded-lg border border-slate-200 text-xs">
-              <span
-                className={`w-2 h-2 rounded-full shrink-0 ${
-                  role === 'super_admin'
-                    ? 'bg-amber-500'
-                    : isAdmin
-                    ? 'bg-emerald-600'
-                    : 'bg-blue-500'
-                }`}
-              />
-              <div className="text-left leading-tight">
-                <span className="font-bold text-slate-900 block max-w-[88px] sm:max-w-[130px] truncate">
-                  {currentUser.nameBn || currentUser.name}
-                </span>
-                <span className="hidden sm:block text-[10px] text-slate-500 truncate max-w-[140px]">
-                  {currentUser.id} · {getRoleLabel(currentUser.role, true)}
-                </span>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={openLogoModal}
+                    title="প্রতিষ্ঠানের লোগো যুক্ত বা পরিবর্তন করুন"
+                    className="hidden sm:flex absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 items-center justify-center shadow-xs border border-emerald-950 cursor-pointer"
+                  >
+                    <ImagePlus className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-xs sm:text-base font-bold tracking-tight text-white truncate">
+                  আস-সুন্নাহ দাওয়াহ অ্যান্ড রিসার্চ ইনস্টিটিউট
+                </h1>
+                <p className="text-[10px] sm:text-xs text-emerald-200/80 truncate hidden sm:block">
+                  অভ্যন্তরীণ দাপ্তরিক ব্যবস্থাপনা ও সিদ্ধান্ত ট্র্যাকার পোর্টাল
+                </p>
               </div>
             </div>
 
-            {/* Logout Button */}
-            <button
-              onClick={logout}
-              title="লগআউট করুন"
-              className="px-2 sm:px-2.5 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">লগআউট</span>
-            </button>
-          </div>
-        </div>
+            {/* Right Controls */}
+            <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+              {/* Notification Bell */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowNotifDropdown(!showNotifDropdown)}
+                  aria-label="নোটিফিকেশন"
+                  className="relative p-2 rounded-lg bg-emerald-900/70 hover:bg-emerald-800 text-emerald-100 border border-emerald-800 transition-colors cursor-pointer"
+                >
+                  <Bell className="w-4 h-4" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-slate-950 text-[10px] font-extrabold flex items-center justify-center">
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
 
-        {/* Mobile Navigation Strip - Compact spacing */}
-        <div className="flex md:hidden items-center gap-1 overflow-x-auto no-scrollbar py-1.5 border-t border-slate-100 -mx-3 px-3">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive =
-              activeNav === item.id || (item.id === 'calendar' && activeNav === 'calendar-policy');
-            return (
+                {showNotifDropdown && (
+                  <div className="fixed sm:absolute left-3 right-3 sm:left-auto sm:right-0 top-14 sm:top-auto sm:mt-2 sm:w-80 bg-white text-slate-900 rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden">
+                    <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800">
+                        নোটিফিকেশন ({unreadCount} অপঠিত)
+                      </span>
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={() => markAllNotificationsAsRead(currentUser.id)}
+                          className="text-[11px] font-semibold text-emerald-800 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <CheckCheck className="w-3.5 h-3.5" /> সব পঠিত করুন
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                      {myNotifications.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-slate-400">
+                          কোনো নোটিফিকেশন নেই
+                        </div>
+                      ) : (
+                        myNotifications.slice(0, 12).map((n) => (
+                          <button
+                            key={n.id}
+                            onClick={() => handleNotificationClick(n.id, n.linkType, n.linkId)}
+                            className={`w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex flex-col gap-1 cursor-pointer ${
+                              !n.isRead ? 'bg-emerald-50/50' : ''
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-slate-800 line-clamp-1">
+                                {n.title}
+                              </span>
+                              {!n.isRead && (
+                                <span className="w-2 h-2 rounded-full bg-emerald-700 shrink-0" />
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-600 line-clamp-2">{n.message}</p>
+                            <span className="text-[10px] text-slate-400">{n.createdAt}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Current User Badge (Desktop & Tablet) */}
+              <div className="hidden md:flex items-center gap-2 pl-2 border-l border-emerald-800">
+                <div className="text-right">
+                  <div className="text-xs font-bold text-white leading-tight max-w-[160px] truncate">
+                    {currentUser.nameBn || currentUser.name}
+                  </div>
+                  <div className="text-[10px] text-amber-300 font-medium">
+                    {getRoleLabel(currentUser.role, true) || currentUser.designationBn}
+                  </div>
+                </div>
+              </div>
+
+              {/* Logout Button (Desktop; on mobile it is also inside the sidebar drawer) */}
               <button
-                key={item.id}
-                onClick={() => setActiveNav(item.id)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 ${
-                  isActive
-                    ? 'bg-emerald-900 text-white shadow-2xs'
-                    : 'text-slate-700 bg-slate-50 hover:bg-slate-100'
-                }`}
+                onClick={logout}
+                title="লগআউট করুন"
+                className="hidden sm:flex items-center gap-1.5 bg-rose-900/60 hover:bg-rose-800 text-rose-100 border border-rose-800/80 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer"
               >
-                <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-amber-300' : 'text-emerald-800'}`} />
-                <span>{item.label}</span>
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">লগআউট</span>
               </button>
-            );
-          })}
-        </div>
-      </div>
+            </div>
+          </div>
 
-      {/* Institutional Logo Upload / Setup Modal (Admins Only) */}
+          {/* Desktop Navigation Bar (Hidden on mobile so mobile stays clean) */}
+          <nav className="hidden md:flex items-center gap-1.5 py-2 border-t border-emerald-900/80 overflow-x-auto no-scrollbar">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive =
+                activeNav === item.id ||
+                (item.id === 'calendar' && activeNav === 'calendar-policy');
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveNav(item.id)}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer shrink-0 ${
+                    isActive
+                      ? 'bg-amber-400 text-slate-950 shadow-2xs font-bold'
+                      : 'text-emerald-100/90 hover:bg-emerald-900 hover:text-white'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      </header>
+
+      {/* Mobile Sidebar Drawer (Opens when clicking the Hamburger Menu button) */}
+      {showMobileSidebar && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          {/* Backdrop */}
+          <div
+            onClick={() => setShowMobileSidebar(false)}
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+          />
+
+          {/* Sidebar Panel */}
+          <aside className="relative z-10 w-72 max-w-[84vw] bg-white text-slate-900 h-full shadow-2xl flex flex-col justify-between overflow-y-auto">
+            <div>
+              {/* Drawer Top Header */}
+              <div className="p-4 bg-emerald-950 text-white border-b border-emerald-900">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-white p-1 border border-amber-400/50 flex items-center justify-center overflow-hidden shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={activeLogoUrl}
+                        alt="Logo"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate">
+                        আস-সুন্নাহ ইনস্টিটিউট
+                      </div>
+                      <div className="text-[10px] text-emerald-200/80 truncate">
+                        দাপ্তরিক ব্যবস্থাপনা পোর্টাল
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileSidebar(false)}
+                    aria-label="মেনু বন্ধ করুন"
+                    className="p-1.5 rounded-lg bg-emerald-900 text-emerald-100 hover:bg-emerald-800 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* User Profile Card inside Mobile Drawer */}
+                <div className="mt-4 pt-3 border-t border-emerald-900/90 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">
+                      {currentUser.nameBn || currentUser.name}
+                    </div>
+                    <div className="text-[11px] text-amber-300 font-medium truncate">
+                      {getRoleLabel(currentUser.role, true) || currentUser.designationBn} ·{' '}
+                      <span className="font-mono text-emerald-200">{currentUser.id}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMobileSidebar(false);
+                      openLogoModal();
+                    }}
+                    className="mt-3 w-full py-1.5 px-2.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-amber-300 border border-emerald-800 text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <ImagePlus className="w-3.5 h-3.5" />
+                    <span>প্রতিষ্ঠানের লোগো পরিবর্তন করুন</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Navigation Links */}
+              <div className="px-3 py-3">
+                <div className="px-2 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  নেভিগেশন মেনু
+                </div>
+                <nav className="space-y-1">
+                  {navItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive =
+                      activeNav === item.id ||
+                      (item.id === 'calendar' && activeNav === 'calendar-policy');
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveNav(item.id);
+                          setShowMobileSidebar(false);
+                        }}
+                        className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-2.5 cursor-pointer text-left ${
+                          isActive
+                            ? 'bg-emerald-900 text-white shadow-2xs'
+                            : 'text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <Icon
+                          className={`w-4 h-4 shrink-0 ${
+                            isActive ? 'text-amber-300' : 'text-emerald-800'
+                          }`}
+                        />
+                        <span>{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </nav>
+              </div>
+            </div>
+
+            {/* Drawer Footer: Logout */}
+            <div className="p-3 border-t border-slate-200 bg-slate-50/60">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileSidebar(false);
+                  logout();
+                }}
+                className="w-full py-2.5 px-3 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>লগআউট করুন</span>
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Institution Logo Upload / Update Modal (Admin Only) */}
       {isAdmin && showLogoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 border border-slate-200 shadow-2xl space-y-4 text-xs">
@@ -392,7 +459,6 @@ export function Header() {
             )}
 
             <form onSubmit={handleSaveLogo} className="space-y-4">
-              {/* Preview */}
               <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-200 gap-2">
                 {logoUrlInput ? (
                   <div className="w-20 h-20 rounded-xl bg-white border border-slate-200 p-2 flex items-center justify-center overflow-hidden shadow-2xs">
@@ -411,7 +477,6 @@ export function Header() {
                 <span className="text-[11px] text-slate-500">লোগো প্রিভিউ</span>
               </div>
 
-              {/* Upload from Device */}
               <div>
                 <input
                   ref={logoFileInputRef}
@@ -430,7 +495,6 @@ export function Header() {
                 </button>
               </div>
 
-              {/* Or Direct URL */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
                   অথবা সরাসরি ছবির লিংক (URL) দিন
@@ -457,7 +521,6 @@ export function Header() {
                 ) : (
                   <div />
                 )}
-
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -478,6 +541,6 @@ export function Header() {
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 }

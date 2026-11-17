@@ -131,7 +131,7 @@ export function QrPunchScannerModal({
   const rafRef = useRef<number | null>(null);
   const processingScanRef = useRef<boolean>(false);
 
-  // Fetch active server QR info strictly for Admin / Super Admin office shortcut
+  // Fetch active server QR info only for Admins (for admin shortcut)
   useEffect(() => {
     if (!isOpen || !isAdmin) return;
     let mounted = true;

@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Cloud, AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { AppProvider, useApp } from '@/lib/store';
-import { DEFAULT_INSTITUTION_LOGO } from '@/lib/initial-data';
+import { resolveInstitutionLogo } from '@/lib/initial-data';
 import { Header } from '@/components/layout/Header';
 import { PersonalWorkspace } from '@/components/workspace/PersonalWorkspace';
 import { EmployeeManager } from '@/components/employee/EmployeeManager';
@@ -144,7 +144,7 @@ function CloudSyncStatusBanner() {
 
 function MainAppContent() {
   const { hydrated, isAuthenticated, activeNav, setActiveNav, policy } = useApp();
-  const activeLogoUrl = policy.institutionLogoUrl || DEFAULT_INSTITUTION_LOGO;
+  const activeLogoUrl = resolveInstitutionLogo(policy.institutionLogoUrl);
 
   if (!hydrated) {
     return (
