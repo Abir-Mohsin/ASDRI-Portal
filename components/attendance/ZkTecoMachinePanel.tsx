@@ -42,55 +42,13 @@ export function ZkTecoMachinePanel() {
     async (showNotice: boolean = false) => {
       if (showNotice) setIsSyncing(true);
       try {
-        // 1) Try to pull from Local PC Bridge (http://127.0.0.1:8080/bridge-status) if running on this computer
-        try {
-          const bridgeController = new AbortController();
-          const timeoutId = setTimeout(() => bridgeController.abort(), 1200);
-          const localRes = await fetch('http://127.0.0.1:8080/bridge-status', {
-            cache: 'no-store',
-            signal: bridgeController.signal,
-          });
-          clearTimeout(timeoutId);
-          if (localRes.ok) {
-            setLocalBridgeOnline(true);
-            const bridgeData = await localRes.json();
-            const bridgeDevices = bridgeData.devices || [];
-            const bridgeLogs = bridgeData.pendingLogs || [];
-            for (const dev of bridgeDevices) {
-              await fetch('/api/zkteco/status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  action: 'heartbeat',
-                  serialNumber: dev.sn || 'ZK-F09',
-                  deviceIp: dev.ip || '192.168.1.201',
-                }),
-              });
-            }
-            for (const item of bridgeLogs) {
-              await fetch('/api/zkteco/status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  action: 'push_logs',
-                  serialNumber: item.sn || 'ZK-F09',
-                  deviceIp: item.ip || '192.168.1.201',
-                  rawLogs: item.raw || '',
-                }),
-              });
-            }
-          } else {
-            setLocalBridgeOnline(false);
-          }
-        } catch {
-          setLocalBridgeOnline(false);
-        }
-
-        // 2) Poll Cloud Server Store (/api/zkteco/status)
+        // Poll Cloud Server Store (/api/zkteco/status) where Local PC Bridge & ADMS push directly
         const res = await fetch('/api/zkteco/status', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
-          setDevices(data.devices || []);
+          const activeDevices: ZkDeviceStatus[] = data.devices || [];
+          setDevices(activeDevices);
+          setLocalBridgeOnline(activeDevices.length > 0);
           const incoming: ZkParsedPunch[] = data.punches || [];
           setBufferedPunches(incoming);
           setLastPolledAt(getDhakaDateTime().timeStr);

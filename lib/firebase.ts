@@ -25,6 +25,58 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 let isSigningIn = false;
 let cachedDriveAccessToken: string | null = null;
 let connectionTestStarted = false;
+let abortGuardInstalled = false;
+
+function isBenignAbortError(reason: unknown): boolean {
+  if (!reason) return false;
+  if (typeof reason === 'object') {
+    const err = reason as { name?: string; message?: string };
+    if (err.name === 'AbortError') return true;
+    if (
+      typeof err.message === 'string' &&
+      (err.message.includes('signal is aborted without reason') ||
+        err.message.includes('The user aborted a request'))
+    ) {
+      return true;
+    }
+  }
+  if (
+    typeof reason === 'string' &&
+    (reason.includes('signal is aborted without reason') || reason.includes('AbortError'))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function installGlobalAbortErrorGuard(): void {
+  if (typeof window === 'undefined' || abortGuardInstalled) return;
+  abortGuardInstalled = true;
+
+  window.addEventListener(
+    'unhandledrejection',
+    (event: PromiseRejectionEvent) => {
+      if (isBenignAbortError(event.reason)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    },
+    true
+  );
+
+  window.addEventListener(
+    'error',
+    (event: ErrorEvent) => {
+      if (isBenignAbortError(event.error) || isBenignAbortError(event.message)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    },
+    true
+  );
+}
+
+installGlobalAbortErrorGuard();
 
 export async function testFirestoreConnection(): Promise<void> {
   if (typeof window === 'undefined' || connectionTestStarted) return;
@@ -32,6 +84,7 @@ export async function testFirestoreConnection(): Promise<void> {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
+    if (isBenignAbortError(error)) return;
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error('Please check your Firebase configuration.');
     }
@@ -41,6 +94,7 @@ export async function testFirestoreConnection(): Promise<void> {
 export function initFirebaseAuth(
   onUserChange: (user: User | null, hasDriveToken: boolean) => void
 ) {
+  installGlobalAbortErrorGuard();
   testFirestoreConnection();
   return onAuthStateChanged(auth, (user) => {
     if (!user) {
