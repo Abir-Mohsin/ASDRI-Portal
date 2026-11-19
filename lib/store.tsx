@@ -18,6 +18,7 @@ import {
   googleSignInWithDrive,
   firebaseGoogleLogout,
   handleFirestoreError,
+  isBenignAbortError,
   OperationType,
 } from './firebase';
 import {
@@ -1227,7 +1228,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Initialize Firebase Auth & check admin privileges
   useEffect(() => {
     const unsubscribe = initFirebaseAuth(async (user, driveTokenPresent) => {
-      await applyFirebaseUserSession(user, driveTokenPresent);
+      try {
+        await applyFirebaseUserSession(user, driveTokenPresent);
+      } catch (err) {
+        if (!isBenignAbortError(err)) {
+          console.error('Auth session error:', err);
+        }
+      }
     });
 
     return () => unsubscribe();
@@ -1242,9 +1249,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     const onListenerError = (path: string, error: unknown) => {
+      if (cancelled || isBenignAbortError(error)) return;
       setCloudSyncStatus('error');
       setCloudSyncError(extractReadableSyncError(error, path));
-      handleFirestoreError(error, OperationType.GET, path);
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch {
+        // Error state already surfaced cleanly in UI banner
+      }
     };
 
     const startSyncAndListeners = async () => {
@@ -1763,11 +1775,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    void startSyncAndListeners();
+    const startTimer = setTimeout(() => {
+      if (!cancelled) {
+        void startSyncAndListeners().catch((err) => {
+          if (!isBenignAbortError(err)) {
+            console.error('Firestore listener startup error:', err);
+          }
+        });
+      }
+    }, 60);
 
     return () => {
       cancelled = true;
-      unsubs.forEach((unsub) => unsub());
+      clearTimeout(startTimer);
+      unsubs.forEach((unsub) => {
+        try {
+          unsub();
+        } catch {
+          // Ignore teardown errors
+        }
+      });
     };
   }, [hydrated, firebaseAuthReady, firebaseUser, isCloudAdmin, pushAllLocalToFirestore]);
 

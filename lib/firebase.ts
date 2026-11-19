@@ -7,12 +7,32 @@ import {
   signOut,
   type User,
 } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  doc,
+  getDocFromServer,
+  type FirestoreSettings,
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+function createFirestoreInstance() {
+  try {
+    // Disabling fetch streams prevents Chromium/Next.js 15 unhandled
+    // "AbortError: signal is aborted without reason" from WebChannel stream teardown.
+    const settings = {
+      experimentalForceLongPolling: true,
+      useFetchStreams: false,
+    } as FirestoreSettings;
+    return initializeFirestore(app, settings, firebaseConfig.firestoreDatabaseId);
+  } catch {
+    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  }
+}
+
+export const db = createFirestoreInstance();
 export const auth = getAuth(app);
 
 export const WORKSPACE_SCOPES = ['https://www.googleapis.com/auth/drive.file'] as const;
@@ -27,7 +47,7 @@ let cachedDriveAccessToken: string | null = null;
 let connectionTestStarted = false;
 let abortGuardInstalled = false;
 
-function isBenignAbortError(reason: unknown): boolean {
+export function isBenignAbortError(reason: unknown): boolean {
   if (!reason) return false;
   if (typeof reason === 'object') {
     const err = reason as { name?: string; message?: string };
@@ -81,6 +101,7 @@ installGlobalAbortErrorGuard();
 export async function testFirestoreConnection(): Promise<void> {
   if (typeof window === 'undefined' || connectionTestStarted) return;
   connectionTestStarted = true;
+  await new Promise((resolve) => setTimeout(resolve, 150));
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
