@@ -12,6 +12,8 @@ import { LeaveManagement } from '@/components/leave/LeaveManagement';
 import { MeetingManagement } from '@/components/meeting/MeetingManagement';
 import { ActionTracker } from '@/components/action-tracker/ActionTracker';
 import { AnnualCalendar } from '@/components/calendar/AnnualCalendar';
+import { InternalChat } from '@/components/chat/InternalChat';
+import { FloatingChatWidget } from '@/components/chat/FloatingChatWidget';
 import { LoginScreen } from '@/components/auth/LoginScreen';
 
 function CloudSyncStatusBanner() {
@@ -187,6 +189,7 @@ function MainAppContent() {
         {activeNav === 'leaves' && <LeaveManagement />}
         {activeNav === 'calendar' && <AnnualCalendar key="calendar-month" initialTab="month" />}
         {activeNav === 'calendar-policy' && <AnnualCalendar key="calendar-policy" initialTab="leave-policy" />}
+        {activeNav === 'chat' && <InternalChat />}
         {activeNav === 'employees' && <EmployeeManager />}
       </main>
 
@@ -198,6 +201,8 @@ function MainAppContent() {
           <div>অভ্যন্তরীণ ব্যবস্থাপনা ও সিদ্ধান্ত ট্র্যাকার সিস্টেম</div>
         </div>
       </footer>
+
+      <FloatingChatWidget />
     </div>
   );
 }

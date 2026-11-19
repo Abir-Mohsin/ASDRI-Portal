@@ -4,6 +4,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  arrayUnion,
   serverTimestamp,
   getDoc,
   getDocs,
@@ -29,6 +30,8 @@ import type {
   AuditLog,
   AttendancePolicyConfig,
   InstitutionalLeavePolicy,
+  ChatConversation,
+  ChatMessage,
 } from './types';
 
 export function isValidFirestoreDocId(id: string): boolean {
@@ -989,6 +992,123 @@ export async function syncAuditLogToFirestore(
     await setDoc(ref, payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
+  }
+}
+
+export async function syncChatConversationToFirestore(
+  conv: ChatConversation,
+  ownerUid: string,
+  participantUids?: string[]
+): Promise<void> {
+  const docId = sanitizeId(conv.id);
+  const path = `chatConversations/${docId}`;
+  try {
+    const ref = doc(db, 'chatConversations', docId);
+    const snap = await getDoc(ref);
+    const payload = stripUndefined({
+      id: docId,
+      type: conv.type === 'group' ? 'group' : 'direct',
+      title: clampString(conv.title, 200) || 'Conversation',
+      department: clampString(conv.department, 120),
+      participantEmployeeIds: clampStringArray(conv.participantEmployeeIds, 100, 150),
+      participantUids: clampStringArray(
+        participantUids || conv.participantUids || (snap.exists() ? snap.data().participantUids : []),
+        100,
+        150
+      ),
+      isDefaultGroup: conv.isDefaultGroup !== undefined ? Boolean(conv.isDefaultGroup) : undefined,
+      createdByEmployeeId: snap.exists()
+        ? snap.data().createdByEmployeeId || sanitizeId(conv.createdByEmployeeId)
+        : sanitizeId(conv.createdByEmployeeId),
+      createdByName: snap.exists()
+        ? snap.data().createdByName || clampString(conv.createdByName, 150) || 'User'
+        : clampString(conv.createdByName, 150) || 'User',
+      lastMessageText: clampString(conv.lastMessageText, 2000),
+      lastMessageSenderId: clampString(conv.lastMessageSenderId, 64),
+      lastMessageSenderName: clampString(conv.lastMessageSenderName, 150),
+      lastMessageAt: clampString(conv.lastMessageAt, 64),
+      ownerUid: snap.exists() ? snap.data().ownerUid || ownerUid : ownerUid,
+      createdAt: snap.exists() ? snap.data().createdAt || serverTimestamp() : serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    await setDoc(ref, payload);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteChatConversationFromFirestore(id: string): Promise<void> {
+  const docId = sanitizeId(id);
+  const path = `chatConversations/${docId}`;
+  try {
+    await deleteDoc(doc(db, 'chatConversations', docId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
+export async function syncChatMessageToFirestore(
+  msg: ChatMessage,
+  ownerUid: string
+): Promise<void> {
+  const docId = sanitizeId(msg.id);
+  const path = `chatMessages/${docId}`;
+  try {
+    const ref = doc(db, 'chatMessages', docId);
+    const snap = await getDoc(ref);
+    const existingData = snap.exists() ? snap.data() : null;
+    const payload = stripUndefined({
+      id: docId,
+      conversationId: existingData?.conversationId || sanitizeId(msg.conversationId),
+      senderEmployeeId: existingData?.senderEmployeeId || sanitizeId(msg.senderEmployeeId),
+      senderName: existingData?.senderName || clampString(msg.senderName, 150) || 'User',
+      senderRole: existingData
+        ? existingData.senderRole
+        : clampString(msg.senderRole, 64),
+      text: clampString(msg.text, 4000) || '.',
+      replyToMessageId: existingData
+        ? existingData.replyToMessageId
+        : clampString(msg.replyToMessageId, 128),
+      replyToSenderName: existingData
+        ? existingData.replyToSenderName
+        : clampString(msg.replyToSenderName, 150),
+      replyToText: existingData
+        ? existingData.replyToText
+        : clampString(msg.replyToText, 1000),
+      readByEmployeeIds: clampStringArray(msg.readByEmployeeIds, 100, 150),
+      ownerUid: existingData?.ownerUid || ownerUid,
+      createdAt: existingData?.createdAt || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    await setDoc(ref, payload);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function markChatMessageReadInFirestore(
+  messageId: string,
+  readerEmployeeId: string,
+  fallbackMsg: ChatMessage,
+  ownerUid: string
+): Promise<void> {
+  const docId = sanitizeId(messageId);
+  const cleanReaderId = clampString(readerEmployeeId, 64);
+  if (!cleanReaderId) return;
+  const path = `chatMessages/${docId}`;
+  try {
+    const ref = doc(db, 'chatMessages', docId);
+    await updateDoc(ref, {
+      readByEmployeeIds: arrayUnion(cleanReaderId),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+    if (code === 'not-found' || String(err).includes('No document to update')) {
+      await syncChatMessageToFirestore(fallbackMsg, ownerUid);
+      return;
+    }
+    handleFirestoreError(err, OperationType.UPDATE, path);
   }
 }
 

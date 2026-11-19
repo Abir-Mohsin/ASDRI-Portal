@@ -342,13 +342,58 @@
         "senderUid": { "type": "string", "maxLength": 128 },
         "title": { "type": "string", "minLength": 1, "maxLength": 250 },
         "message": { "type": "string", "minLength": 1, "maxLength": 1500 },
-        "linkType": { "type": "string", "enum": ["task", "meeting", "leave", "tracker", "notice"] },
+        "linkType": { "type": "string", "enum": ["task", "meeting", "leave", "tracker", "notice", "chat"] },
         "isRead": { "type": "boolean" },
         "priority": { "type": "string", "enum": ["normal", "urgent"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "recipientEmployeeId", "recipientUid", "senderUid", "title", "message", "linkType", "isRead", "priority", "createdAt", "updatedAt"]
+    },
+    "ChatConversation": {
+      "title": "ChatConversation",
+      "description": "Internal personal (1-to-1 direct) or group chat conversation thread.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["direct", "group"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "department": { "type": "string", "maxLength": 120 },
+        "participantEmployeeIds": { "type": "array" },
+        "participantUids": { "type": "array" },
+        "isDefaultGroup": { "type": "boolean" },
+        "createdByEmployeeId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "createdByName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "lastMessageText": { "type": "string", "maxLength": 2000 },
+        "lastMessageSenderId": { "type": "string", "maxLength": 64 },
+        "lastMessageSenderName": { "type": "string", "maxLength": 150 },
+        "lastMessageAt": { "type": "string", "maxLength": 64 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "title", "participantEmployeeIds", "createdByEmployeeId", "createdByName", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Real-time internal chat message supporting direct and group replies and read tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "conversationId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderEmployeeId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "senderName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "senderRole": { "type": "string", "maxLength": 64 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "replyToMessageId": { "type": "string", "maxLength": 128 },
+        "replyToSenderName": { "type": "string", "maxLength": 150 },
+        "replyToText": { "type": "string", "maxLength": 1000 },
+        "readByEmployeeIds": { "type": "array" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "conversationId", "senderEmployeeId", "senderName", "text", "readByEmployeeIds", "ownerUid", "createdAt", "updatedAt"]
     },
     "AuditLog": {
       "title": "AuditLog",
@@ -444,6 +489,14 @@
     "/notifications/{notifId}": {
       "schema": { "$ref": "#/entities/InAppNotification" },
       "description": "Targeted notifications."
+    },
+    "/chatConversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/ChatConversation" },
+      "description": "Internal personal and group chat conversation threads."
+    },
+    "/chatMessages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Internal chat messages with reply and read status tracking."
     },
     "/auditLogs/{logId}": {
       "schema": { "$ref": "#/entities/AuditLog" },

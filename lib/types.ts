@@ -461,13 +461,47 @@ export interface InAppNotification {
   senderName: string;
   title: string;
   message: string;
-  linkType: 'task' | 'meeting' | 'leave' | 'tracker' | 'notice';
+  linkType: 'task' | 'meeting' | 'leave' | 'tracker' | 'notice' | 'chat';
   linkId?: string;
   actionTrackerId?: string;
   relatedTaskId?: string;
   createdAt: string;
   isRead: boolean;
   priority: 'normal' | 'urgent';
+}
+
+export type ChatConversationType = 'direct' | 'group';
+
+export interface ChatConversation {
+  id: string;
+  type: ChatConversationType;
+  title: string;
+  department?: string;
+  participantEmployeeIds: string[];
+  participantUids?: string[];
+  isDefaultGroup?: boolean;
+  createdByEmployeeId: string;
+  createdByName: string;
+  lastMessageText?: string;
+  lastMessageSenderId?: string;
+  lastMessageSenderName?: string;
+  lastMessageAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  senderEmployeeId: string;
+  senderName: string;
+  senderRole?: Role;
+  text: string;
+  replyToMessageId?: string;
+  replyToSenderName?: string;
+  replyToText?: string;
+  readByEmployeeIds: string[];
+  createdAt: string;
 }
 
 export interface ActionTrackerItem {

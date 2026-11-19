@@ -46,6 +46,10 @@ import {
   syncAuditLogToFirestore,
   syncAttendancePolicyToFirestore,
   syncLeavePolicyToFirestore,
+  syncChatConversationToFirestore,
+  deleteChatConversationFromFirestore,
+  syncChatMessageToFirestore,
+  markChatMessageReadInFirestore,
   isValidFirestoreDocId,
   renameEmployeeIdInFirestore,
   fetchFirestoreVerificationStats,
@@ -74,6 +78,8 @@ import {
   CalendarEvent,
   InstitutionalLeavePolicy,
   SpecialDayConfig,
+  ChatConversation,
+  ChatMessage,
 } from './types';
 import {
   INITIAL_POLICY,
@@ -237,6 +243,12 @@ interface AppContextType {
   policy: AttendancePolicyConfig;
   calendarEvents: CalendarEvent[];
   institutionalLeavePolicy: InstitutionalLeavePolicy;
+  chatConversations: ChatConversation[];
+  chatMessages: ChatMessage[];
+  activeChatConversationId: string | null;
+  setActiveChatConversationId: (id: string | null) => void;
+  unreadChatCount: number;
+  getConversationUnreadCount: (conversationId: string) => number;
 
   // Actions
   addEmployee: (emp: Omit<Employee, 'id'> & { id: string }) => Promise<CloudSyncActionResult>;
@@ -328,6 +340,25 @@ interface AppContextType {
       targetDate?: string;
     }
   ) => void;
+  startDirectChat: (targetEmployeeId: string) => string;
+  createGroupChat: (params: {
+    title: string;
+    department?: string;
+    participantEmployeeIds: string[];
+  }) => string;
+  updateGroupChatMembers: (
+    conversationId: string,
+    params: { title?: string; participantEmployeeIds: string[] }
+  ) => void;
+  deleteGroupChat: (conversationId: string) => void;
+  sendChatMessage: (params: {
+    conversationId: string;
+    text: string;
+    replyToMessageId?: string;
+    replyToSenderName?: string;
+    replyToText?: string;
+  }) => void;
+  markConversationAsRead: (conversationId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -347,6 +378,8 @@ const STORAGE_KEYS = {
   MEETINGS: 'asdri_v2_meetings',
   NOTIFICATIONS: 'asdri_v2_notifications',
   ACTION_TRACKER: 'asdri_v2_action_tracker',
+  CHAT_CONVERSATIONS: 'asdri_v2_chat_conversations',
+  CHAT_MESSAGES: 'asdri_v2_chat_messages',
   PENDING_SYNC: 'asdri_v2_pending_sync',
   AUTH_USER_ID: 'asdri_v3_auth_user_id',
   EXPLICIT_LOGOUT: 'asdri_v3_explicit_logout',
@@ -443,6 +476,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [institutionalLeavePolicy, setInstitutionalLeavePolicy] = useState<InstitutionalLeavePolicy>(
     INITIAL_INSTITUTIONAL_LEAVE_POLICY
   );
+  const [chatConversations, setChatConversations] = useState<ChatConversation[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [activeChatConversationId, setActiveChatConversationId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState<boolean>(false);
 
   // Firebase Auth & Firestore Cloud Sync State
@@ -475,6 +511,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     notifications,
     policy,
     institutionalLeavePolicy,
+    chatConversations,
+    chatMessages,
   });
 
   useEffect(() => {
@@ -492,6 +530,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       notifications,
       policy,
       institutionalLeavePolicy,
+      chatConversations,
+      chatMessages,
     };
   }, [
     employees,
@@ -507,6 +547,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     notifications,
     policy,
     institutionalLeavePolicy,
+    chatConversations,
+    chatMessages,
   ]);
 
   useEffect(() => {
@@ -706,6 +748,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        const savedConvs = localStorage.getItem(STORAGE_KEYS.CHAT_CONVERSATIONS);
+        if (savedConvs) {
+          try {
+            const parsed = JSON.parse(savedConvs);
+            if (Array.isArray(parsed)) setChatConversations(parsed);
+          } catch {
+            // ignore
+          }
+        }
+
+        const savedMsgs = localStorage.getItem(STORAGE_KEYS.CHAT_MESSAGES);
+        if (savedMsgs) {
+          try {
+            const parsed = JSON.parse(savedMsgs);
+            if (Array.isArray(parsed)) setChatMessages(parsed);
+          } catch {
+            // ignore
+          }
+        }
+
         const pendingFlag = localStorage.getItem(STORAGE_KEYS.PENDING_SYNC);
         if (pendingFlag === '1') {
           hasPendingLocalChangesRef.current = true;
@@ -850,8 +912,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
       totalSynced += notifRes.okCount;
       allErrors.push(...notifRes.errors);
+
+      const convRes = await runChunkedTasks(snapshot.chatConversations, (c) =>
+        syncChatConversationToFirestore(c, uid, resolveUidsForEmployeeIds(c.participantEmployeeIds))
+      );
+      totalSynced += convRes.okCount;
+      allErrors.push(...convRes.errors);
+
+      const msgRes = await runChunkedTasks(snapshot.chatMessages.slice(-200), (m) =>
+        syncChatMessageToFirestore(m, uid)
+      );
+      totalSynced += msgRes.okCount;
+      allErrors.push(...msgRes.errors);
     } else {
-      // Non-admin staff member: sync own personal attendance, corrections, and leave requests cleanly
+      // Non-admin staff member: sync own personal attendance, corrections, leave requests, and chat messages cleanly
       const myEmpId = currentUserRef.current.id;
       const myAtt = snapshot.attendanceRecords.filter((r) => r.employeeId === myEmpId);
       const myRaw = snapshot.rawPunches.filter(
@@ -863,12 +937,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const myLeaves = snapshot.leaveApplications.filter(
         (l) => l.employeeId === myEmpId && l.status === 'Pending_Dept_Head'
       );
+      const myConvs = snapshot.chatConversations.filter((c) =>
+        c.participantEmployeeIds.includes(myEmpId)
+      );
+      const myMsgs = snapshot.chatMessages
+        .filter((m) => m.senderEmployeeId === myEmpId)
+        .slice(-100);
 
       const resList = await Promise.all([
         runChunkedTasks(myAtt, (r) => syncAttendanceRecordToFirestore(r, uid)),
         runChunkedTasks(myRaw, (p) => syncRawPunchToFirestore(p, uid)),
         runChunkedTasks(myCorr, (c) => syncCorrectionToFirestore(c, uid)),
         runChunkedTasks(myLeaves, (l) => syncLeaveApplicationToFirestore(l, uid)),
+        runChunkedTasks(myConvs, (c) =>
+          syncChatConversationToFirestore(c, uid, resolveUidsForEmployeeIds(c.participantEmployeeIds))
+        ),
+        runChunkedTasks(myMsgs, (m) => syncChatMessageToFirestore(m, uid)),
       ]);
       for (const r of resList) {
         totalSynced += r.okCount;
@@ -1581,6 +1665,83 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         )
       );
 
+      // Chat Conversations (Real-time internal personal & group threads)
+      unsubs.push(
+        onSnapshot(
+          collection(db, 'chatConversations'),
+          (snap) => {
+            if (!snap.empty || cloudInitializedRef.current) {
+              const list = snap.docs.map((d) => {
+                const data = d.data();
+                return {
+                  ...(data as ChatConversation),
+                  id: String(data.id || d.id),
+                  participantEmployeeIds: Array.isArray(data.participantEmployeeIds)
+                    ? data.participantEmployeeIds
+                    : [],
+                  createdAt: toIsoStringSafe(data.createdAt, new Date().toISOString()),
+                  updatedAt: toIsoStringSafe(data.updatedAt, new Date().toISOString()),
+                } as ChatConversation;
+              });
+              setChatConversations((prev) => {
+                const byId = new Map<string, ChatConversation>();
+                prev.forEach((c) => byId.set(c.id, c));
+                list.forEach((c) => byId.set(c.id, c));
+                return Array.from(byId.values());
+              });
+            }
+          },
+          (error) => {
+            onListenerError('chatConversations', error);
+          }
+        )
+      );
+
+      // Chat Messages (Real-time message stream)
+      unsubs.push(
+        onSnapshot(
+          collection(db, 'chatMessages'),
+          (snap) => {
+            if (!snap.empty || cloudInitializedRef.current) {
+              const cloudList = snap.docs.map((d) => {
+                const data = d.data();
+                return {
+                  ...(data as ChatMessage),
+                  id: String(data.id || d.id),
+                  readByEmployeeIds: Array.isArray(data.readByEmployeeIds)
+                    ? data.readByEmployeeIds
+                    : [],
+                  createdAt: toIsoStringSafe(data.createdAt, new Date().toISOString()),
+                } as ChatMessage;
+              });
+              setChatMessages((prev) => {
+                const prevMap = new Map<string, ChatMessage>();
+                prev.forEach((m) => prevMap.set(m.id, m));
+                const merged = cloudList.map((cloudMsg) => {
+                  const localMsg = prevMap.get(cloudMsg.id);
+                  if (!localMsg) return cloudMsg;
+                  const mergedReadBy = Array.from(
+                    new Set([
+                      ...(cloudMsg.readByEmployeeIds || []),
+                      ...(localMsg.readByEmployeeIds || []),
+                    ])
+                  );
+                  return {
+                    ...cloudMsg,
+                    createdAt: cloudMsg.createdAt || localMsg.createdAt,
+                    readByEmployeeIds: mergedReadBy,
+                  };
+                });
+                return merged.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+              });
+            }
+          },
+          (error) => {
+            onListenerError('chatMessages', error);
+          }
+        )
+      );
+
       // Admin Audit Logs
       if (isCloudAdmin) {
         unsubs.push(
@@ -1627,6 +1788,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem(STORAGE_KEYS.MEETINGS, JSON.stringify(meetings));
       localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
       localStorage.setItem(STORAGE_KEYS.ACTION_TRACKER, JSON.stringify(actionTrackerItems));
+      localStorage.setItem(STORAGE_KEYS.CHAT_CONVERSATIONS, JSON.stringify(chatConversations));
+      localStorage.setItem(STORAGE_KEYS.CHAT_MESSAGES, JSON.stringify(chatMessages));
     } catch {
       // Ignore quota errors
     }
@@ -1645,7 +1808,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     meetings,
     notifications,
     actionTrackerItems,
+    chatConversations,
+    chatMessages,
   ]);
+
+  // Cross-tab instant chat synchronization (supports read receipts & live replies across tabs even offline)
+  useEffect(() => {
+    if (!hydrated || typeof window === 'undefined') return;
+    const handleStorage = (e: StorageEvent) => {
+      try {
+        if (e.key === STORAGE_KEYS.CHAT_MESSAGES && e.newValue) {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setChatMessages(parsed as ChatMessage[]);
+          }
+        } else if (e.key === STORAGE_KEYS.CHAT_CONVERSATIONS && e.newValue) {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setChatConversations(parsed as ChatConversation[]);
+          }
+        }
+      } catch {
+        // Ignore malformed storage payload
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [hydrated]);
 
   // Sync dark class on html
   useEffect(() => {
@@ -1716,26 +1905,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const sendNotification = (notifData: Omit<InAppNotification, 'id' | 'createdAt' | 'isRead'>) => {
-    const newNotif: InAppNotification = {
-      ...notifData,
-      id: `NOTIF-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 5)}`,
-      createdAt: new Date().toISOString(),
-      isRead: false,
-    };
-    setNotifications((prev) => [newNotif, ...prev]);
-    const currentAuth = auth.currentUser;
-    if (currentAuth?.emailVerified) {
-      const recipientUid =
-        empUidMapRef.current[newNotif.recipientEmployeeId] || currentAuth.uid;
-      runCloudWrite(
-        () => syncNotificationToFirestore(newNotif, currentAuth.uid, recipientUid),
-        `notifications/${newNotif.id}`
-      );
-    } else {
-      markPendingLocalChange();
-    }
-  };
+  const sendNotification = useCallback(
+    (notifData: Omit<InAppNotification, 'id' | 'createdAt' | 'isRead'>) => {
+      const newNotif: InAppNotification = {
+        ...notifData,
+        id: `NOTIF-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 5)}`,
+        createdAt: new Date().toISOString(),
+        isRead: false,
+      };
+      setNotifications((prev) => [newNotif, ...prev]);
+      const currentAuth = auth.currentUser;
+      if (currentAuth?.emailVerified) {
+        const recipientUid =
+          empUidMapRef.current[newNotif.recipientEmployeeId] || currentAuth.uid;
+        runCloudWrite(
+          () => syncNotificationToFirestore(newNotif, currentAuth.uid, recipientUid),
+          `notifications/${newNotif.id}`
+        );
+      } else {
+        markPendingLocalChange();
+      }
+    },
+    [runCloudWrite, markPendingLocalChange]
+  );
 
   const login = (identifier: string, passcode?: string): boolean => {
     const cleanInput = identifier.trim().toLowerCase();
@@ -4204,6 +4396,471 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  // Derive default institutional and departmental chat groups merged with persisted conversations
+  const mergedChatConversations = React.useMemo(() => {
+    const activeEmps = employees.filter((e) => e.status === 'Active');
+    if (activeEmps.length === 0) return chatConversations;
+
+    const allIds = activeEmps.map((e) => e.id);
+    const deptMap = new Map<string, string[]>();
+    for (const emp of activeEmps) {
+      const dept = (emp.department || 'প্রশাসন').trim();
+      if (!dept) continue;
+      const list = deptMap.get(dept) || [];
+      list.push(emp.id);
+      deptMap.set(dept, list);
+    }
+
+    const next = [...chatConversations];
+
+    // 1. General Institutional Group (GRP-GENERAL)
+    const genIdx = next.findIndex((c) => c.id === 'GRP-GENERAL');
+    if (genIdx === -1) {
+      next.unshift({
+        id: 'GRP-GENERAL',
+        type: 'group',
+        title: 'ASDRI সাধারণ চ্যানেল (সকল সদস্য)',
+        participantEmployeeIds: allIds,
+        isDefaultGroup: true,
+        createdByEmployeeId: currentUser.id || allIds[0] || 'SYSTEM',
+        createdByName: 'ASDRI প্রশাসন',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+    } else {
+      const existingGen = next[genIdx];
+      const mergedIds = Array.from(new Set([...existingGen.participantEmployeeIds, ...allIds]));
+      if (mergedIds.length !== existingGen.participantEmployeeIds.length) {
+        next[genIdx] = {
+          ...existingGen,
+          participantEmployeeIds: mergedIds,
+        };
+      }
+    }
+
+    // 2. Departmental Default Groups
+    let deptCounter = 1;
+    for (const [deptName, memberIds] of deptMap.entries()) {
+      let hash = 0;
+      for (let i = 0; i < deptName.length; i++) {
+        hash = (hash * 31 + deptName.charCodeAt(i)) >>> 0;
+      }
+      const deptGroupId = `GRP-DEPT-${hash.toString(36).toUpperCase() || deptCounter}`;
+      deptCounter++;
+
+      const dIdx = next.findIndex(
+        (c) => c.id === deptGroupId || (c.isDefaultGroup && c.department === deptName)
+      );
+      if (dIdx === -1) {
+        next.push({
+          id: deptGroupId,
+          type: 'group',
+          title: `${deptName} বিভাগ`,
+          department: deptName,
+          participantEmployeeIds: memberIds,
+          isDefaultGroup: true,
+          createdByEmployeeId: currentUser.id || memberIds[0] || 'SYSTEM',
+          createdByName: 'ASDRI প্রশাসন',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        });
+      } else {
+        const existingDept = next[dIdx];
+        const mergedIds = Array.from(
+          new Set([...existingDept.participantEmployeeIds, ...memberIds])
+        );
+        if (mergedIds.length !== existingDept.participantEmployeeIds.length) {
+          next[dIdx] = {
+            ...existingDept,
+            participantEmployeeIds: mergedIds,
+          };
+        }
+      }
+    }
+
+    return next;
+  }, [chatConversations, employees, currentUser.id]);
+
+  const getConversationUnreadCount = useCallback(
+    (conversationId: string): number => {
+      if (!currentUser.id) return 0;
+      const conv = mergedChatConversations.find((c) => c.id === conversationId);
+      if (!conv) return 0;
+      const isParticipant =
+        conv.isDefaultGroup || conv.participantEmployeeIds.includes(currentUser.id);
+      if (!isParticipant) return 0;
+
+      return chatMessages.filter(
+        (m) =>
+          m.conversationId === conversationId &&
+          m.senderEmployeeId !== currentUser.id &&
+          !m.readByEmployeeIds.includes(currentUser.id)
+      ).length;
+    },
+    [mergedChatConversations, chatMessages, currentUser.id]
+  );
+
+  const unreadChatCount = React.useMemo(() => {
+    if (!currentUser.id) return 0;
+    const accessibleIds = new Set(
+      mergedChatConversations
+        .filter((c) => c.isDefaultGroup || c.participantEmployeeIds.includes(currentUser.id))
+        .map((c) => c.id)
+    );
+    return chatMessages.filter(
+      (m) =>
+        accessibleIds.has(m.conversationId) &&
+        m.senderEmployeeId !== currentUser.id &&
+        !m.readByEmployeeIds.includes(currentUser.id)
+    ).length;
+  }, [mergedChatConversations, chatMessages, currentUser.id]);
+
+  const startDirectChat = useCallback(
+    (targetEmployeeId: string): string => {
+      const myId = currentUser.id;
+      if (!myId || !targetEmployeeId) return '';
+
+      const pair = [myId, targetEmployeeId].sort();
+      const sanitizePart = (s: string) => s.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+      const directId = `DM-${sanitizePart(pair[0])}__${sanitizePart(pair[1])}`;
+
+      const existing = mergedChatConversations.find(
+        (c) =>
+          c.id === directId ||
+          (c.type === 'direct' &&
+            c.participantEmployeeIds.length === 2 &&
+            c.participantEmployeeIds.includes(myId) &&
+            c.participantEmployeeIds.includes(targetEmployeeId))
+      );
+
+      if (existing) {
+        setActiveChatConversationId(existing.id);
+        return existing.id;
+      }
+
+      const targetEmp = employees.find((e) => e.id === targetEmployeeId);
+      const myName = currentUser.nameBn || currentUser.name;
+      const targetName = targetEmp ? targetEmp.nameBn || targetEmp.name : targetEmployeeId;
+
+      const newConv: ChatConversation = {
+        id: directId,
+        type: 'direct',
+        title: `${myName} ও ${targetName}`,
+        participantEmployeeIds: pair,
+        createdByEmployeeId: myId,
+        createdByName: myName,
+        createdAt: new Date().toISOString(),
+      };
+
+      setChatConversations((prev) => [newConv, ...prev.filter((c) => c.id !== directId)]);
+      setActiveChatConversationId(directId);
+
+      const writerUid = activeUid || auth.currentUser?.uid || '';
+      if (writerUid) {
+        runCloudWrite(
+          () =>
+            syncChatConversationToFirestore(
+              newConv,
+              writerUid,
+              resolveUidsForEmployeeIds(pair)
+            ),
+          `chatConversations/${directId}`
+        );
+      } else {
+        markPendingLocalChange();
+      }
+
+      return directId;
+    },
+    [
+      currentUser,
+      mergedChatConversations,
+      employees,
+      activeUid,
+      runCloudWrite,
+      resolveUidsForEmployeeIds,
+      markPendingLocalChange,
+    ]
+  );
+
+  const createGroupChat = useCallback(
+    (params: {
+      title: string;
+      department?: string;
+      participantEmployeeIds: string[];
+    }): string => {
+      const cleanTitle = params.title.trim();
+      if (!cleanTitle) return '';
+      const myId = currentUser.id || 'ADMIN';
+      const myName = currentUser.nameBn || currentUser.name || 'প্রশাসন';
+      const members = Array.from(new Set([myId, ...params.participantEmployeeIds])).filter(Boolean);
+      const groupId = `GRP-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+      const newGroup: ChatConversation = {
+        id: groupId,
+        type: 'group',
+        title: cleanTitle,
+        department: params.department?.trim() || undefined,
+        participantEmployeeIds: members,
+        isDefaultGroup: false,
+        createdByEmployeeId: myId,
+        createdByName: myName,
+        createdAt: new Date().toISOString(),
+      };
+
+      setChatConversations((prev) => [newGroup, ...prev]);
+      setActiveChatConversationId(groupId);
+
+      const writerUid = activeUid || auth.currentUser?.uid || '';
+      if (writerUid) {
+        runCloudWrite(
+          () =>
+            syncChatConversationToFirestore(
+              newGroup,
+              writerUid,
+              resolveUidsForEmployeeIds(members)
+            ),
+          `chatConversations/${groupId}`
+        );
+      } else {
+        markPendingLocalChange();
+      }
+
+      return groupId;
+    },
+    [
+      currentUser,
+      activeUid,
+      runCloudWrite,
+      resolveUidsForEmployeeIds,
+      markPendingLocalChange,
+    ]
+  );
+
+  const updateGroupChatMembers = useCallback(
+    (
+      conversationId: string,
+      params: { title?: string; participantEmployeeIds: string[] }
+    ) => {
+      const existing = mergedChatConversations.find((c) => c.id === conversationId);
+      if (!existing || existing.type !== 'group') return;
+
+      const updatedMembers = Array.from(new Set(params.participantEmployeeIds)).filter(Boolean);
+      const updatedConv: ChatConversation = {
+        ...existing,
+        title: params.title?.trim() || existing.title,
+        participantEmployeeIds: updatedMembers,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setChatConversations((prev) => {
+        const existsInPrev = prev.some((c) => c.id === conversationId);
+        if (existsInPrev) {
+          return prev.map((c) => (c.id === conversationId ? updatedConv : c));
+        }
+        return [updatedConv, ...prev];
+      });
+
+      const writerUid = activeUid || auth.currentUser?.uid || '';
+      if (writerUid) {
+        runCloudWrite(
+          () =>
+            syncChatConversationToFirestore(
+              updatedConv,
+              writerUid,
+              resolveUidsForEmployeeIds(updatedMembers)
+            ),
+          `chatConversations/${conversationId}`
+        );
+      } else {
+        markPendingLocalChange();
+      }
+    },
+    [
+      mergedChatConversations,
+      activeUid,
+      runCloudWrite,
+      resolveUidsForEmployeeIds,
+      markPendingLocalChange,
+    ]
+  );
+
+  const deleteGroupChat = useCallback(
+    (conversationId: string) => {
+      const target = mergedChatConversations.find((c) => c.id === conversationId);
+      if (!target || target.isDefaultGroup) return;
+
+      setChatConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      if (activeChatConversationId === conversationId) {
+        setActiveChatConversationId(null);
+      }
+
+      const writerUid = activeUid || auth.currentUser?.uid || '';
+      if (writerUid) {
+        runCloudWrite(
+          () => deleteChatConversationFromFirestore(conversationId),
+          `chatConversations/${conversationId}`
+        );
+      } else {
+        markPendingLocalChange();
+      }
+    },
+    [mergedChatConversations, activeChatConversationId, activeUid, runCloudWrite, markPendingLocalChange]
+  );
+
+  const sendChatMessage = useCallback(
+    (params: {
+      conversationId: string;
+      text: string;
+      replyToMessageId?: string;
+      replyToSenderName?: string;
+      replyToText?: string;
+    }) => {
+      const cleanText = params.text.trim();
+      if (!cleanText || !params.conversationId) return;
+
+      const myId = currentUser.id || 'USER';
+      const myName = currentUser.nameBn || currentUser.name || 'সদস্য';
+      const nowIso = new Date().toISOString();
+      const msgId = `MSG-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+      const newMsg: ChatMessage = {
+        id: msgId,
+        conversationId: params.conversationId,
+        senderEmployeeId: myId,
+        senderName: myName,
+        senderRole: currentUser.role,
+        text: cleanText,
+        replyToMessageId: params.replyToMessageId,
+        replyToSenderName: params.replyToSenderName,
+        replyToText: params.replyToText,
+        readByEmployeeIds: [myId],
+        createdAt: nowIso,
+      };
+
+      setChatMessages((prev) => [...prev, newMsg]);
+
+      let targetConv = mergedChatConversations.find((c) => c.id === params.conversationId);
+      if (targetConv) {
+        const updatedConv: ChatConversation = {
+          ...targetConv,
+          lastMessageText: cleanText.slice(0, 200),
+          lastMessageSenderId: myId,
+          lastMessageSenderName: myName,
+          lastMessageAt: nowIso,
+          updatedAt: nowIso,
+        };
+        targetConv = updatedConv;
+        setChatConversations((prev) => {
+          const existsInPrev = prev.some((c) => c.id === params.conversationId);
+          if (existsInPrev) {
+            return prev.map((c) => (c.id === params.conversationId ? updatedConv : c));
+          }
+          return [updatedConv, ...prev];
+        });
+      }
+
+      const writerUid = activeUid || auth.currentUser?.uid || '';
+      if (writerUid) {
+        const convToSync = targetConv;
+        runCloudWrite(async () => {
+          await syncChatMessageToFirestore(newMsg, writerUid);
+          if (convToSync) {
+            await syncChatConversationToFirestore(
+              convToSync,
+              writerUid,
+              resolveUidsForEmployeeIds(convToSync.participantEmployeeIds)
+            );
+          }
+        }, `chatMessages/${msgId}`);
+      } else {
+        markPendingLocalChange();
+      }
+
+      // Send in-app notification to conversation participants (except sender)
+      if (targetConv) {
+        const recipients = targetConv.participantEmployeeIds.filter((id) => id !== myId);
+        const preview = cleanText.length > 80 ? `${cleanText.slice(0, 80)}...` : cleanText;
+        for (const recId of recipients) {
+          const recEmp = employees.find((e) => e.id === recId);
+          sendNotification({
+            recipientEmployeeId: recId,
+            recipientName: recEmp ? recEmp.nameBn || recEmp.name : recId,
+            senderEmployeeId: myId,
+            senderName: myName,
+            title:
+              targetConv.type === 'direct'
+                ? `${myName} আপনাকে একটি বার্তা পাঠিয়েছেন`
+                : `${targetConv.title}-এ ${myName}-এর নতুন বার্তা`,
+            message: preview,
+            linkType: 'chat',
+            linkId: targetConv.id,
+            priority: 'normal',
+          });
+        }
+      }
+    },
+    [
+      currentUser,
+      mergedChatConversations,
+      employees,
+      activeUid,
+      runCloudWrite,
+      resolveUidsForEmployeeIds,
+      markPendingLocalChange,
+      sendNotification,
+    ]
+  );
+
+  const markConversationAsRead = useCallback(
+    (conversationId: string) => {
+      const myId = currentUser.id;
+      if (!myId || !conversationId) return;
+
+      const unreadMsgs = chatMessages.filter(
+        (m) =>
+          m.conversationId === conversationId &&
+          m.senderEmployeeId !== myId &&
+          !m.readByEmployeeIds.includes(myId)
+      );
+
+      if (unreadMsgs.length === 0) return;
+
+      const updatedMsgMap = new Map<string, ChatMessage>();
+      for (const m of unreadMsgs) {
+        updatedMsgMap.set(m.id, {
+          ...m,
+          readByEmployeeIds: Array.from(new Set([...m.readByEmployeeIds, myId])),
+        });
+      }
+
+      setChatMessages((prev) => prev.map((m) => updatedMsgMap.get(m.id) || m));
+
+      // Also mark matching chat notifications for this conversation as read
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.recipientEmployeeId === myId &&
+          n.linkType === 'chat' &&
+          n.linkId === conversationId &&
+          !n.isRead
+            ? { ...n, isRead: true }
+            : n
+        )
+      );
+
+      const writerUid = activeUid || auth.currentUser?.uid || '';
+      if (writerUid) {
+        const toSync = Array.from(updatedMsgMap.values());
+        runCloudWrite(async () => {
+          for (const msg of toSync) {
+            await markChatMessageReadInFirestore(msg.id, myId, msg, writerUid);
+          }
+        }, `chatMessages/read`);
+      } else {
+        markPendingLocalChange();
+      }
+    },
+    [currentUser.id, chatMessages, activeUid, runCloudWrite, markPendingLocalChange]
+  );
+
   const updatePolicy = (newPolicy: Partial<AttendancePolicyConfig>) => {
     const updated = { ...policy, ...newPolicy };
     setPolicy(updated);
@@ -4270,6 +4927,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         policy,
         calendarEvents,
         institutionalLeavePolicy,
+        chatConversations: mergedChatConversations,
+        chatMessages,
+        activeChatConversationId,
+        setActiveChatConversationId,
+        unreadChatCount,
+        getConversationUnreadCount,
         addEmployee,
         updateEmployee,
         deleteEmployee,
@@ -4319,6 +4982,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         markNoticeAsRead,
         updatePolicy,
         logAudit,
+        startDirectChat,
+        createGroupChat,
+        updateGroupChatMembers,
+        deleteGroupChat,
+        sendChatMessage,
+        markConversationAsRead,
       }}
     >
       {children}

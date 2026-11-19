@@ -517,12 +517,66 @@ service cloud.firestore {
         isValidId(data.senderUid) &&
         isValidString(data.title, 1, 250) &&
         isValidString(data.message, 1, 1500) &&
-        data.linkType in ['task', 'meeting', 'leave', 'tracker', 'notice'] &&
+        data.linkType in ['task', 'meeting', 'leave', 'tracker', 'notice', 'chat'] &&
         isValidOptionalString(data, 'linkId', 128) &&
         isValidOptionalString(data, 'actionTrackerId', 128) &&
         isValidOptionalString(data, 'relatedTaskId', 128) &&
         data.isRead is bool &&
         data.priority in ['normal', 'urgent'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidChatConversation(data) {
+      return data.keys().hasAll([
+          'id', 'type', 'title', 'participantEmployeeIds',
+          'createdByEmployeeId', 'createdByName', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'type', 'title', 'department', 'participantEmployeeIds',
+          'participantUids', 'isDefaultGroup', 'createdByEmployeeId',
+          'createdByName', 'lastMessageText', 'lastMessageSenderId',
+          'lastMessageSenderName', 'lastMessageAt', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.type in ['direct', 'group'] &&
+        isValidString(data.title, 1, 200) &&
+        isValidOptionalString(data, 'department', 120) &&
+        isValidStringList(data.participantEmployeeIds, 100) &&
+        (!('participantUids' in data) || isValidStringList(data.participantUids, 100)) &&
+        isValidOptionalBool(data, 'isDefaultGroup') &&
+        isValidString(data.createdByEmployeeId, 1, 64) &&
+        isValidString(data.createdByName, 1, 150) &&
+        isValidOptionalString(data, 'lastMessageText', 2000) &&
+        isValidOptionalString(data, 'lastMessageSenderId', 64) &&
+        isValidOptionalString(data, 'lastMessageSenderName', 150) &&
+        isValidOptionalString(data, 'lastMessageAt', 64) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll([
+          'id', 'conversationId', 'senderEmployeeId', 'senderName',
+          'text', 'readByEmployeeIds', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'conversationId', 'senderEmployeeId', 'senderName',
+          'senderRole', 'text', 'replyToMessageId', 'replyToSenderName',
+          'replyToText', 'readByEmployeeIds', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.conversationId) &&
+        isValidString(data.senderEmployeeId, 1, 64) &&
+        isValidString(data.senderName, 1, 150) &&
+        isValidOptionalString(data, 'senderRole', 64) &&
+        isValidString(data.text, 1, 4000) &&
+        isValidOptionalString(data, 'replyToMessageId', 128) &&
+        isValidOptionalString(data, 'replyToSenderName', 150) &&
+        isValidOptionalString(data, 'replyToText', 1000) &&
+        isValidStringList(data.readByEmployeeIds, 100) &&
+        isValidId(data.ownerUid) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -948,6 +1002,44 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'updatedAt']))
         );
       allow delete: if isPortalOrAdmin() && isValidId(notifId);
+    }
+
+    match /chatConversations/{conversationId} {
+      allow get: if isValidId(conversationId) && isPortalOrVerified();
+      allow list: if isPortalOrVerified();
+      allow create: if isPortalOrVerified() && isValidId(conversationId) && isValidChatConversation(incoming()) &&
+        incoming().id == conversationId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isPortalOrAdmin() || incoming().ownerUid == request.auth.uid);
+      allow update: if isPortalOrVerified() && isValidId(conversationId) && isValidChatConversation(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'department', 'participantEmployeeIds', 'participantUids',
+          'isDefaultGroup', 'lastMessageText', 'lastMessageSenderId',
+          'lastMessageSenderName', 'lastMessageAt', 'updatedAt'
+        ]);
+      allow delete: if isPortalOrAdmin() && isValidId(conversationId);
+    }
+
+    match /chatMessages/{messageId} {
+      allow get: if isValidId(messageId) && isPortalOrVerified();
+      allow list: if isPortalOrVerified();
+      allow create: if isPortalOrVerified() && isValidId(messageId) && isValidChatMessage(incoming()) &&
+        incoming().id == messageId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isPortalOrAdmin() || incoming().ownerUid == request.auth.uid);
+      allow update: if isPortalOrVerified() && isValidId(messageId) && isValidChatMessage(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().conversationId == existing().conversationId &&
+        incoming().senderEmployeeId == existing().senderEmployeeId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['text', 'readByEmployeeIds', 'updatedAt']);
+      allow delete: if isPortalOrAdmin() && isValidId(messageId);
     }
 
     match /auditLogs/{logId} {

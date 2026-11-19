@@ -14,6 +14,7 @@ import {
   ListChecks,
   LogOut,
   Menu,
+  MessageSquare,
   Trash2,
   Upload,
   Users,
@@ -31,6 +32,8 @@ export function Header() {
     markNotificationAsRead,
     markAllNotificationsAsRead,
     setFocusedMeetingId,
+    unreadChatCount,
+    setActiveChatConversationId,
     logout,
     policy,
     updatePolicy,
@@ -117,6 +120,7 @@ export function Header() {
     { id: 'attendance', label: 'উপস্থিতি ও পাঞ্চ', icon: Clock },
     { id: 'leaves', label: 'ছুটি ব্যবস্থাপনা', icon: FileText },
     { id: 'calendar', label: 'বার্ষিক ক্যালেন্ডার', icon: Calendar },
+    { id: 'chat', label: 'অভ্যন্তরীণ চ্যাট', icon: MessageSquare },
     ...(isAdministrativeRole(currentUser.role)
       ? [{ id: 'employees', label: 'শিক্ষক ও স্টাফ', icon: Users }]
       : []),
@@ -132,6 +136,9 @@ export function Header() {
       setActiveNav('meetings');
     } else if (linkType === 'leave') {
       setActiveNav('leaves');
+    } else if (linkType === 'chat') {
+      if (linkId) setActiveChatConversationId(linkId);
+      setActiveNav('chat');
     } else if (linkType === 'task') {
       setActiveNav('workspace');
     }
@@ -149,9 +156,12 @@ export function Header() {
                 type="button"
                 onClick={() => setShowMobileSidebar(true)}
                 aria-label="মেনু খুলুন"
-                className="md:hidden p-2 -ml-1 rounded-lg bg-emerald-900/80 hover:bg-emerald-800 text-amber-300 border border-emerald-800 transition-colors cursor-pointer shrink-0"
+                className="relative md:hidden p-2 -ml-1 rounded-lg bg-emerald-900/80 hover:bg-emerald-800 text-amber-300 border border-emerald-800 transition-colors cursor-pointer shrink-0"
               >
                 <Menu className="w-5 h-5" />
+                {unreadChatCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 border border-emerald-950" />
+                )}
               </button>
 
               <div className="relative group shrink-0">
@@ -297,6 +307,17 @@ export function Header() {
                 >
                   <Icon className="w-3.5 h-3.5" />
                   <span>{item.label}</span>
+                  {item.id === 'chat' && unreadChatCount > 0 && (
+                    <span
+                      className={`ml-0.5 min-w-5 h-5 px-1.5 rounded-md text-[10px] font-extrabold tabular-nums inline-flex items-center justify-center ${
+                        isActive
+                          ? 'bg-emerald-950 text-amber-300'
+                          : 'bg-amber-400 text-slate-950'
+                      }`}
+                    >
+                      {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -404,7 +425,18 @@ export function Header() {
                             isActive ? 'text-amber-300' : 'text-emerald-800'
                           }`}
                         />
-                        <span>{item.label}</span>
+                        <span className="flex-1 truncate">{item.label}</span>
+                        {item.id === 'chat' && unreadChatCount > 0 && (
+                          <span
+                            className={`min-w-5 h-5 px-1.5 rounded-md text-[10px] font-extrabold tabular-nums inline-flex items-center justify-center ${
+                              isActive
+                                ? 'bg-amber-400 text-slate-950'
+                                : 'bg-emerald-900 text-white'
+                            }`}
+                          >
+                            {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
