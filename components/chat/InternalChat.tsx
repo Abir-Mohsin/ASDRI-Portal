@@ -12,7 +12,6 @@ import {
   Send,
   Settings2,
   Trash2,
-  User,
   UserPlus,
   Users,
   X,
@@ -137,8 +136,6 @@ export function InternalChat() {
           subtitle: other
             ? `${other.designationBn || other.designation} · ${other.department}`
             : 'ব্যক্তিগত চ্যাট',
-          photoUrl: other?.photoUrl || '',
-          initials: (other?.nameBn || other?.name || conv.title || 'স').slice(0, 1),
         };
       }
       return {
@@ -146,8 +143,6 @@ export function InternalChat() {
         subtitle: conv.department
           ? `${conv.department} · ${conv.participantEmployeeIds.length} জন সদস্য`
           : `${conv.participantEmployeeIds.length} জন সদস্য`,
-        photoUrl: '',
-        initials: (conv.title || 'গ').slice(0, 1),
       };
     },
     [currentUser.id, employeeMap]
@@ -451,21 +446,8 @@ export function InternalChat() {
                     key={emp.id}
                     type="button"
                     onClick={() => handleStartDirectWithColleague(emp.id)}
-                    className="w-full px-3.5 py-3 flex items-center gap-3 hover:bg-emerald-50/50 transition-colors text-left cursor-pointer"
+                    className="w-full px-3.5 py-3 flex items-center justify-between gap-3 hover:bg-emerald-50/50 transition-colors text-left cursor-pointer"
                   >
-                    <div className="w-9 h-9 rounded-full bg-emerald-900 text-amber-300 font-bold text-xs flex items-center justify-center shrink-0 overflow-hidden border border-emerald-800/30">
-                      {emp.photoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={emp.photoUrl}
-                          alt={emp.nameBn || emp.name}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        (emp.nameBn || emp.name || 'স').slice(0, 1)
-                      )}
-                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-bold text-slate-900 truncate">
                         {emp.nameBn || emp.name}
@@ -502,44 +484,25 @@ export function InternalChat() {
                     key={conv.id}
                     type="button"
                     onClick={() => handleSelectConversation(conv.id)}
-                    className={`w-full px-3.5 py-3 flex items-start gap-3 transition-colors text-left cursor-pointer ${
+                    className={`w-full px-3.5 py-3 flex items-start gap-2.5 transition-colors text-left cursor-pointer ${
                       isSelected
                         ? 'bg-emerald-50/90'
                         : 'bg-white/60 hover:bg-slate-100/70'
                     }`}
                   >
-                    <div
-                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-xs font-bold overflow-hidden ${
-                        conv.type === 'group'
-                          ? 'bg-emerald-950 text-amber-300'
-                          : 'bg-slate-200 text-slate-800'
-                      }`}
-                    >
-                      {disp.photoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={disp.photoUrl}
-                          alt={disp.name}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : conv.type === 'group' ? (
-                        <Users className="w-4 h-4" />
-                      ) : (
-                        disp.initials
-                      )}
-                    </div>
-
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <span
-                          className={`text-xs truncate ${
+                          className={`text-xs truncate flex items-center gap-1.5 min-w-0 ${
                             unread > 0 || isSelected
                               ? 'font-bold text-slate-950'
                               : 'font-semibold text-slate-800'
                           }`}
                         >
-                          {disp.name}
+                          {conv.type === 'group' && (
+                            <Users className="w-3.5 h-3.5 text-emerald-800 shrink-0" />
+                          )}
+                          <span className="truncate">{disp.name}</span>
                         </span>
                         <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
                           {formatMessageTime(conv.lastMessageAt)}
@@ -631,31 +594,12 @@ export function InternalChat() {
                     <ArrowLeft className="w-4 h-4" />
                   </button>
 
-                  <div
-                    className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-xs font-bold overflow-hidden ${
-                      activeConversation.type === 'group'
-                        ? 'bg-emerald-950 text-amber-300'
-                        : 'bg-slate-200 text-slate-800'
-                    }`}
-                  >
-                    {activeDisp.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={activeDisp.photoUrl}
-                        alt={activeDisp.name}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : activeConversation.type === 'group' ? (
-                      <Users className="w-4 h-4" />
-                    ) : (
-                      <User className="w-4 h-4" />
-                    )}
-                  </div>
-
                   <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-slate-900 truncate">
-                      {activeDisp.name}
+                    <h3 className="text-sm font-bold text-slate-900 truncate flex items-center gap-1.5">
+                      {activeConversation.type === 'group' && (
+                        <Users className="w-4 h-4 text-emerald-800 shrink-0" />
+                      )}
+                      <span className="truncate">{activeDisp.name}</span>
                     </h3>
                     <div className="text-[11px] text-slate-500 truncate">
                       {activeDisp.subtitle}

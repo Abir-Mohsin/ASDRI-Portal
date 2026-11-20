@@ -315,23 +315,13 @@ export function FloatingChatWidget() {
                         onClick={() => handleOpenThread(conv.id)}
                         className="w-full px-3.5 py-2.5 flex items-center gap-2.5 hover:bg-slate-50 text-left cursor-pointer"
                       >
-                        <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
-                            conv.type === 'group'
-                              ? 'bg-emerald-950 text-amber-300'
-                              : 'bg-slate-200 text-slate-800'
-                          }`}
-                        >
-                          {conv.type === 'group' ? (
-                            <Users className="w-3.5 h-3.5" />
-                          ) : (
-                            getDisplayName(conv).slice(0, 1)
-                          )}
-                        </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold text-slate-900 truncate">
-                              {getDisplayName(conv)}
+                            <span className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5 min-w-0">
+                              {conv.type === 'group' && (
+                                <Users className="w-3.5 h-3.5 text-emerald-800 shrink-0" />
+                              )}
+                              <span className="truncate">{getDisplayName(conv)}</span>
                             </span>
                             <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
                               {formatShortTime(conv.lastMessageAt)}

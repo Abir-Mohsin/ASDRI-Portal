@@ -8,6 +8,7 @@ import {
   Calendar,
   CheckCheck,
   Clock,
+  Download,
   FileText,
   ImagePlus,
   LayoutDashboard,
@@ -22,6 +23,8 @@ import {
   X,
 } from 'lucide-react';
 import { getRoleLabel, isAdministrativeRole } from '@/lib/types';
+import { PWAInstallButton } from '@/components/pwa/PWAInstallButton';
+import { downloadDataUrlFile, generatePwaIconSetFromLogo } from '@/lib/pwa-icon-generator';
 
 export function Header() {
   const {
@@ -67,30 +70,36 @@ export function Header() {
       if (!dataUrl) return;
       const img = new window.Image();
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 220;
-        let w = img.width || 160;
-        let h = img.height || 160;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
+        const trySizes = [512, 384, 288, 220];
+        let bestDataUrl = '';
+        for (const maxDim of trySizes) {
+          const canvas = document.createElement('canvas');
+          let w = img.width || maxDim;
+          let h = img.height || maxDim;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) continue;
+          ctx.clearRect(0, 0, w, h);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, w, h);
+          const candidate = canvas.toDataURL('image/png');
+          bestDataUrl = candidate;
+          if (candidate.length <= 140000) {
+            break;
           }
         }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, w, h);
-          ctx.drawImage(img, 0, 0, w, h);
-          const compressed = canvas.toDataURL('image/png', 0.9);
-          setLogoUrlInput(compressed);
-        } else {
-          setLogoUrlInput(dataUrl);
-        }
+        setLogoUrlInput(bestDataUrl || dataUrl);
       };
       img.onerror = () => {
         setLogoError('সঠিক ছবির ফাইল (PNG, JPG, SVG বা WEBP) নির্বাচন করুন।');
@@ -106,6 +115,26 @@ export function Header() {
       institutionLogoUrl: logoUrlInput.trim(),
     });
     setShowLogoModal(false);
+  };
+
+  const handleDownloadStaticPwaIcons = async () => {
+    const targetLogo = logoUrlInput.trim() || activeLogoUrl;
+    const iconSet = await generatePwaIconSetFromLogo(targetLogo);
+    if (!iconSet.isCanvasRendered) {
+      setLogoError('বাহ্যিক লিংক থেকে সরাসরি PNG তৈরি করা যায়নি। অনুগ্রহ করে লোগো ফাইলটি সরাসরি আপলোড করুন।');
+      return;
+    }
+    const files = [
+      { url: iconSet.icon192, name: 'pwa-192x192.png' },
+      { url: iconSet.icon512, name: 'pwa-512x512.png' },
+      { url: iconSet.iconMaskable512, name: 'pwa-maskable-512x512.png' },
+      { url: iconSet.icon180, name: 'apple-touch-icon.png' },
+    ];
+    files.forEach((f, idx) => {
+      window.setTimeout(() => {
+        downloadDataUrlFile(f.url, f.name);
+      }, idx * 200);
+    });
   };
 
   const myNotifications = notifications.filter(
@@ -202,6 +231,8 @@ export function Header() {
 
             {/* Right Controls */}
             <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+              <PWAInstallButton variant="header" />
+
               {/* Notification Bell */}
               <div className="relative">
                 <button
@@ -444,8 +475,12 @@ export function Header() {
               </div>
             </div>
 
-            {/* Drawer Footer: Logout */}
-            <div className="p-3 border-t border-slate-200 bg-slate-50/60">
+            {/* Drawer Footer: Install & Logout */}
+            <div className="p-3 border-t border-slate-200 bg-slate-50/60 space-y-2">
+              <PWAInstallButton
+                variant="drawer"
+                onAfterClick={() => setShowMobileSidebar(false)}
+              />
               <button
                 type="button"
                 onClick={() => {
@@ -472,7 +507,7 @@ export function Header() {
                   প্রতিষ্ঠানের লোগো যুক্ত / পরিবর্তন করুন
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  লোগোটি হেডার এবং লগইন পেজে সকলের জন্য প্রদর্শিত হবে।
+                  লোগোটি হেডার, লগইন পেজ এবং মোবাইল/ডেস্কটপ অ্যাপ আইকন হিসেবে স্বয়ংক্রিয়ভাবে ব্যবহৃত হবে।
                 </p>
               </div>
               <button
@@ -491,23 +526,50 @@ export function Header() {
             )}
 
             <form onSubmit={handleSaveLogo} className="space-y-4">
-              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-200 gap-2">
-                {logoUrlInput ? (
-                  <div className="w-20 h-20 rounded-xl bg-white border border-slate-200 p-2 flex items-center justify-center overflow-hidden shadow-2xs">
+              <div className="grid grid-cols-2 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="flex flex-col items-center justify-center gap-1.5">
+                  {logoUrlInput ? (
+                    <div className="w-16 h-16 rounded-xl bg-white border border-slate-200 p-2 flex items-center justify-center overflow-hidden shadow-2xs">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={logoUrlInput}
+                        alt="Logo Preview"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 rounded-xl bg-emerald-900 text-amber-400 border border-amber-500/40 flex items-center justify-center font-bold text-2xl">
+                      আ
+                    </div>
+                  )}
+                  <span className="text-[11px] text-slate-500">পোর্টাল লোগো</span>
+                </div>
+
+                <div className="flex flex-col items-center justify-center gap-1.5 border-l border-slate-200 pl-3">
+                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 p-2 flex items-center justify-center overflow-hidden shadow-md">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={logoUrlInput}
-                      alt="Logo Preview"
+                      src={logoUrlInput || '/icon.svg'}
+                      alt="App Icon Preview"
                       className="w-full h-full object-contain"
                     />
                   </div>
-                ) : (
-                  <div className="w-16 h-16 rounded-xl bg-emerald-900 text-amber-400 border border-amber-500/40 flex items-center justify-center font-bold text-2xl">
-                    আ
-                  </div>
-                )}
-                <span className="text-[11px] text-slate-500">লোগো প্রিভিউ</span>
+                  <span className="text-[11px] font-semibold text-slate-700">
+                    অ্যাপ আইকন প্রিভিউ
+                  </span>
+                </div>
               </div>
+
+              {logoUrlInput && (
+                <button
+                  type="button"
+                  onClick={handleDownloadStaticPwaIcons}
+                  className="w-full py-2 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-800" />
+                  <span>অ্যাপ আইকন ফাইল (PNG প্যাক) ডাউনলোড করুন</span>
+                </button>
+              )}
 
               <div>
                 <input

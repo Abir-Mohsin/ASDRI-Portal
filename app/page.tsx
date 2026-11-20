@@ -15,6 +15,7 @@ import { AnnualCalendar } from '@/components/calendar/AnnualCalendar';
 import { InternalChat } from '@/components/chat/InternalChat';
 import { FloatingChatWidget } from '@/components/chat/FloatingChatWidget';
 import { LoginScreen } from '@/components/auth/LoginScreen';
+import { DynamicPwaIconSync } from '@/components/pwa/DynamicPwaIconSync';
 
 function CloudSyncStatusBanner() {
   const {
@@ -210,6 +211,7 @@ function MainAppContent() {
 export default function HomePage() {
   return (
     <AppProvider>
+      <DynamicPwaIconSync />
       <MainAppContent />
     </AppProvider>
   );
