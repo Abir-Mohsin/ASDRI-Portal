@@ -57,6 +57,7 @@ import {
   type FirestoreVerificationStats,
 } from './firestore-sync';
 import { parseZkAttLogPayload, type ZkParsedPunch } from './zkteco-parser';
+import { verifyAttendancePunchClient } from './client-qr';
 import {
   Employee,
   DailyAttendanceRecord,
@@ -2156,32 +2157,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const response = await fetch('/api/attendance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          employeeId: emp.id,
-          punchType,
-          deviceId,
-          gps: {
-            lat,
-            lng,
-            accuracy,
-            isMocked,
-            timestamp: Date.now(),
-          },
-          qrToken,
-          policyConfig: {
-            campusLat: policy.campusLat,
-            campusLng: policy.campusLng,
-            geofenceRadiusMeters: policy.geofenceRadiusMeters,
-            qrRotationSeconds: policy.qrRotationSeconds,
-          },
-        }),
+      const data = verifyAttendancePunchClient({
+        employeeId: emp.id,
+        punchType,
+        deviceId,
+        gps: {
+          lat,
+          lng,
+          accuracy,
+          isMocked,
+          timestamp: Date.now(),
+        },
+        qrInput: qrToken,
+        policyConfig: {
+          campusLat: policy.campusLat,
+          campusLng: policy.campusLng,
+          geofenceRadiusMeters: policy.geofenceRadiusMeters,
+          qrRotationSeconds: policy.qrRotationSeconds,
+          requireGpsVerification: policy.requireGpsVerification,
+        },
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
+      if (!data.ok || !data.verification) {
         logAudit(
           'PUNCH_VERIFICATION_REJECTED',
           'Attendance',

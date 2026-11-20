@@ -5,6 +5,7 @@ import jsQR from 'jsqr';
 import { Camera, X, CheckCircle2, RefreshCw, AlertTriangle, LogIn, LogOut, Keyboard } from 'lucide-react';
 import { useApp, VerifiedPunchResult } from '@/lib/store';
 import { isAdministrativeRole } from '@/lib/types';
+import { generateDynamicQrToken } from '@/lib/client-qr';
 
 interface QrPunchScannerModalProps {
   isOpen: boolean;
@@ -131,26 +132,18 @@ export function QrPunchScannerModal({
   const rafRef = useRef<number | null>(null);
   const processingScanRef = useRef<boolean>(false);
 
-  // Fetch active server QR info only for Admins (for admin shortcut)
+  // Generate active rotating QR info for Admins (client-side, zero server dependency)
   useEffect(() => {
     if (!isOpen || !isAdmin) return;
-    let mounted = true;
-    const loadQr = async () => {
-      try {
-        const rot = policy.qrRotationSeconds || 30;
-        const res = await fetch(`/api/attendance?rotationSeconds=${rot}`, { cache: 'no-store' });
-        if (res.ok && mounted) {
-          const data = await res.json();
-          setServerQr({ token: data.token, shortCode: data.shortCode });
-        }
-      } catch {
-        // Ignore offline errors
-      }
+    const loadQr = () => {
+      const rot = policy.qrRotationSeconds || 30;
+      const data = generateDynamicQrToken(rot);
+      setServerQr({ token: data.token, shortCode: data.shortCode });
     };
-    loadQr();
+    const initTimer = setTimeout(loadQr, 0);
     const interval = setInterval(loadQr, 3000);
     return () => {
-      mounted = false;
+      clearTimeout(initTimer);
       clearInterval(interval);
     };
   }, [isOpen, isAdmin, policy.qrRotationSeconds]);

@@ -14,6 +14,7 @@ import type { SubmittedFileAttachment } from '@/lib/types';
 import { useApp } from '@/lib/store';
 import { getDriveAccessToken } from '@/lib/firebase';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
+import { uploadWorkSubmissionToDrive, deleteDriveSubmissionFile } from '@/lib/client-drive';
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes < 1024) return `${bytes || 0} B`;
@@ -80,29 +81,19 @@ export function GoogleDriveFileUploader({
         const file = selectedFiles[i];
         setUploadingName(file.name);
 
-        const formData = new FormData();
-        formData.append('file', file);
-        if (taskSerial !== undefined) {
-          formData.append('taskSerial', String(taskSerial));
-        }
-        formData.append('employeeId', employeeId);
-        formData.append('employeeName', employeeName);
-
-        const res = await fetch('/api/drive', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: formData,
+        const data = await uploadWorkSubmissionToDrive({
+          accessToken,
+          file,
+          taskSerial,
+          employeeId,
+          employeeName,
         });
-
-        const data = await res.json();
-        if (!res.ok || !data.ok || !data.attachment) {
+        if (!data.ok || !data.attachment) {
           setUploadError(data.message || `${file.name} Google Drive-এ আপলোড করা যায়নি।`);
           break;
         }
 
-        newAttachments.push(data.attachment as SubmittedFileAttachment);
+        newAttachments.push(data.attachment);
       }
 
       if (newAttachments.length > 0) {
@@ -144,12 +135,8 @@ export function GoogleDriveFileUploader({
 
     setDeletingFromDrive(true);
     try {
-      const res = await fetch(`/api/drive?fileId=${encodeURIComponent(driveId)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+      const data = await deleteDriveSubmissionFile(token, driveId);
+      if (!data.ok) {
         setUploadError(data.message || 'Google Drive থেকে ফাইলটি মুছা যায়নি।');
       } else {
         onChange(files.filter((f) => f.id !== target.id));

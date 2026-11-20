@@ -6,6 +6,7 @@ import { AttendanceStatus, Employee, isAdministrativeRole } from '@/lib/types';
 import { getDayOperationalStatus, enumerateDateRange, toBnDigits } from '@/lib/calendar-utils';
 import { QrPunchScannerModal, useQrCameraPunch } from '@/components/attendance/QrPunchScannerModal';
 import { ZkTecoMachinePanel } from '@/components/attendance/ZkTecoMachinePanel';
+import { generateDynamicQrToken } from '@/lib/client-qr';
 import QRCode from 'qrcode';
 import {
   MapPin,
@@ -77,7 +78,6 @@ export function AttendanceDashboard() {
     calendarEvents,
     createCalendarEventsBatch,
     deleteCalendarEvent,
-    ingestZkMachinePunches,
   } = useApp();
 
   const isAdmin = isAdministrativeRole(currentUser.role);
@@ -124,31 +124,6 @@ export function AttendanceDashboard() {
       window.removeEventListener('online', handleOnline);
     };
   }, [syncOfflinePunches]);
-
-  // Background ZKTeco F09 ADMS Auto-Ingestion for Admins
-  useEffect(() => {
-    if (!isAdmin) return;
-    let active = true;
-    const syncZkBuffer = async () => {
-      try {
-        const res = await fetch('/api/zkteco/status', { cache: 'no-store' });
-        if (res.ok && active) {
-          const data = await res.json();
-          if (Array.isArray(data.punches) && data.punches.length > 0) {
-            ingestZkMachinePunches(data.punches);
-          }
-        }
-      } catch {
-        // Ignore offline errors
-      }
-    };
-    syncZkBuffer();
-    const timer = setInterval(syncZkBuffer, 8000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [isAdmin, ingestZkMachinePunches]);
 
   // GPS State
   const [gpsState, setGpsState] = useState<{
@@ -223,33 +198,30 @@ export function AttendanceDashboard() {
   const fetchDynamicQr = useCallback(async () => {
     try {
       const rot = policy.qrRotationSeconds || 30;
-      const res = await fetch(`/api/attendance?rotationSeconds=${rot}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        setServerQr({
-          token: data.token,
-          shortCode: data.shortCode,
-          remainingSeconds: data.remainingSeconds,
-          rotationSeconds: data.rotationSeconds,
-          serverTime: data.serverTime,
-        });
+      const data = generateDynamicQrToken(rot);
+      setServerQr({
+        token: data.token,
+        shortCode: data.shortCode,
+        remainingSeconds: data.remainingSeconds,
+        rotationSeconds: data.rotationSeconds,
+        serverTime: data.serverTime,
+      });
 
-        try {
-          const url = await QRCode.toDataURL(data.token, {
-            width: 280,
-            margin: 1,
-            color: {
-              dark: '#0f4c3a',
-              light: '#ffffff',
-            },
-          });
-          setQrDataUrl(url);
-        } catch {
-          // Fallback if canvas render fails
-        }
+      try {
+        const url = await QRCode.toDataURL(data.token, {
+          width: 280,
+          margin: 1,
+          color: {
+            dark: '#0f4c3a',
+            light: '#ffffff',
+          },
+        });
+        setQrDataUrl(url);
+      } catch {
+        // Fallback if canvas render fails
       }
     } catch {
-      // Offline or transient error
+      // Ignore transient errors
     }
   }, [policy.qrRotationSeconds]);
 

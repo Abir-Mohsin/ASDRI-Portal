@@ -21,6 +21,11 @@ import { getDriveAccessToken } from '@/lib/firebase';
 import firebaseConfig from '@/firebase-applet-config.json';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 import type { FirestoreVerificationStats } from '@/lib/firestore-sync';
+import {
+  listDriveSubmissionFiles,
+  uploadBackupToDrive,
+  deleteDriveSubmissionFile,
+} from '@/lib/client-drive';
 
 interface DriveFileItem {
   id: string;
@@ -91,12 +96,8 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/drive', {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
+      const data = await listDriveSubmissionFiles(token);
+      if (!data.ok) {
         setErrorMsg(data.message || 'Google Drive ফাইল লোড করা যায়নি।');
         return;
       }
@@ -211,20 +212,12 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
         institutionalLeavePolicy,
       };
 
-      const res = await fetch('/api/drive', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'backup',
-          fileName: `ASDRI_Backup_${new Date().toISOString().slice(0, 10)}.json`,
-          data: snapshotPayload,
-        }),
+      const data = await uploadBackupToDrive({
+        accessToken: token,
+        fileName: `ASDRI_Backup_${new Date().toISOString().slice(0, 10)}.json`,
+        data: snapshotPayload,
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
+      if (!data.ok) {
         setErrorMsg(data.message || 'Google Drive ব্যাকআপ সেভ করা যায়নি।');
         return;
       }
@@ -252,12 +245,8 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
     setErrorMsg(null);
     setStatusMsg(null);
     try {
-      const res = await fetch(`/api/drive?fileId=${encodeURIComponent(targetFile.id)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
+      const data = await deleteDriveSubmissionFile(token, targetFile.id);
+      if (!data.ok) {
         setErrorMsg(data.message || 'Google Drive থেকে ফাইলটি মুছা যায়নি।');
         return;
       }
