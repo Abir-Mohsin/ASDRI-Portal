@@ -51,6 +51,7 @@ interface GoogleDriveControlModalProps {
 
 export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriveControlModalProps) {
   const {
+    currentUser,
     firebaseUser,
     hasDriveToken,
     cloudSyncStatus,
@@ -260,7 +261,7 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
   };
 
   const isFullyConnected = Boolean(firebaseUser && hasDriveToken);
-  const isFirebaseSignedInOnly = Boolean(firebaseUser && !hasDriveToken);
+  const isCloudConnectedOnly = Boolean((firebaseUser || currentUser?.id) && !hasDriveToken);
   const hasSyncError = cloudSyncStatus === 'error' || Boolean(cloudSyncError);
 
   return (
@@ -273,7 +274,7 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
             ? cloudSyncError || 'ক্লাউড সিঙ্ক ব্যর্থ হয়েছে'
             : isFullyConnected
             ? 'Google Drive ও Cloud সক্রিয়'
-            : isFirebaseSignedInOnly
+            : isCloudConnectedOnly
             ? 'Firebase Cloud সক্রিয়'
             : 'Google Drive ও Cloud সংযোগ করুন'
         }
@@ -284,7 +285,7 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
             ? 'bg-rose-50 hover:bg-rose-100 text-rose-900 border-rose-300'
             : isFullyConnected
             ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-200'
-            : isFirebaseSignedInOnly
+            : isCloudConnectedOnly
             ? 'bg-sky-50 hover:bg-sky-100 text-sky-900 border-sky-200'
             : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
         }`}
@@ -296,7 +297,7 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
             className={`w-3.5 h-3.5 shrink-0 ${
               isFullyConnected
                 ? 'text-emerald-700'
-                : isFirebaseSignedInOnly
+                : isCloudConnectedOnly
                 ? 'text-sky-700'
                 : 'text-amber-600'
             }`}
@@ -309,7 +310,7 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
             ? 'সিঙ্ক হচ্ছে...'
             : isFullyConnected
             ? 'Drive ও Cloud সক্রিয়'
-            : isFirebaseSignedInOnly
+            : isCloudConnectedOnly
             ? 'Cloud সক্রিয়'
             : 'Cloud সংযোগ'}
         </span>
@@ -443,16 +444,28 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
                 )}
               </div>
 
-              {firebaseUser ? (
+              {firebaseUser || currentUser?.id ? (
                 <div className="space-y-2">
                   <div className="text-slate-700 flex flex-wrap items-center justify-between gap-2">
                     <span>
-                      <strong>সংযুক্ত অ্যাকাউন্ট:</strong> {firebaseUser.displayName || 'User'}{' '}
-                      <span className="font-mono text-emerald-800">({firebaseUser.email})</span>
-                      {!firebaseUser.emailVerified && (
-                        <span className="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">
-                          ইমেইল যাচাইকৃত নয়
-                        </span>
+                      {firebaseUser ? (
+                        <>
+                          <strong>সংযুক্ত অ্যাকাউন্ট:</strong> {firebaseUser.displayName || 'User'}{' '}
+                          <span className="font-mono text-emerald-800">({firebaseUser.email})</span>
+                          {!firebaseUser.emailVerified && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">
+                              ইমেইল যাচাইকৃত নয়
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <strong>পোর্টাল সেশন:</strong> {currentUser.nameBn || currentUser.name}{' '}
+                          <span className="font-mono text-emerald-800">({currentUser.id})</span>
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                            আইডি ও পাসওয়ার্ড ক্লাউড সিঙ্ক সক্রিয়
+                          </span>
+                        </>
                       )}
                     </span>
                     {cloudLastSyncedAt && (
@@ -502,14 +515,7 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
                     )}
                   </div>
                 </div>
-              ) : (
-                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-950 space-y-1">
-                  <div className="font-bold">ডায়াগনস্টিকস: Firebase Auth এখনো সংযুক্ত নয়</div>
-                  <p>
-                    আইডি/পাসওয়ার্ড দিয়ে পোর্টালে লগইন থাকলেও, Firestore-এ ডেটা পাঠাতে ও সব ডিভাইস থেকে দেখতে নিচে Google দিয়ে Sign in করুন।
-                  </p>
-                </div>
-              )}
+              ) : null}
             </div>
 
             {/* Google Drive Connection & Files */}
@@ -520,7 +526,7 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
                   <span>
                     {firebaseUser
                       ? 'এই সেশনে Google Drive অ্যাক্সেস পুনঃসংযোগ করুন'
-                      : 'Google Drive ও ক্লাউড সিঙ্ক চালু করুন'}
+                      : 'ফাইল আপলোড ও ব্যাকআপের জন্য Google Drive যুক্ত করুন (ঐচ্ছিক)'}
                   </span>
                 </div>
                 <p className="text-slate-700 leading-relaxed">

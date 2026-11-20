@@ -15,6 +15,7 @@ import {
   auth,
   db,
   initFirebaseAuth,
+  googleSignInBasic,
   googleSignInWithDrive,
   firebaseGoogleLogout,
   handleFirestoreError,
@@ -29,6 +30,8 @@ import {
   syncAdminUserToFirestore,
   syncLinkedUsersAndAdmins,
   lookupEmployeeBindingByEmail,
+  lookupPortalCredential,
+  claimEmployeeAuthUidInFirestore,
   getEmployeePrivateContactInfo,
   linkGoogleUserProfile,
   syncAttendanceRecordToFirestore,
@@ -190,7 +193,7 @@ interface AppContextType {
   // Authentication & session
   hydrated: boolean;
   isAuthenticated: boolean;
-  login: (employeeId: string, passcode?: string) => boolean;
+  login: (employeeId: string, passcode?: string) => Promise<boolean>;
   logout: () => void;
   currentUser: Employee;
   setCurrentUser: (emp: Employee) => void;
@@ -218,10 +221,16 @@ interface AppContextType {
   hasPendingLocalChanges: boolean;
   cloudLastSyncedAt: string | null;
   clearCloudSyncError: () => void;
+  signInWithGoogleAccount: () => Promise<{
+    user: User;
+    matchedEmployee?: Employee | null;
+    unauthorizedEmail?: string;
+  } | null>;
   connectGoogleWorkspace: () => Promise<{
     user: User;
     accessToken: string;
     matchedEmployee?: Employee | null;
+    unauthorizedEmail?: string;
   } | null>;
   disconnectGoogleWorkspace: () => Promise<void>;
   pushAllLocalToFirestore: () => Promise<number>;
@@ -589,12 +598,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCloudSyncError(null);
   }, []);
 
-  const activeUid = firebaseUser?.emailVerified ? firebaseUser.uid : null;
+  const toPortalCloudUid = (empId: string) =>
+    `portal_${empId.trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'}`;
+
+  const isPortalCloudSession = !firebaseUser && isAuthenticated && Boolean(currentUser.id);
+
+  const activeUid = firebaseUser?.emailVerified
+    ? firebaseUser.uid
+    : isPortalCloudSession
+    ? toPortalCloudUid(currentUser.id)
+    : null;
+
+  const resolveActiveWriterUid = (): string | null => {
+    const currentAuthUser = auth.currentUser;
+    if (currentAuthUser?.emailVerified) return currentAuthUser.uid;
+    if (!currentAuthUser && isAuthenticatedRef.current && currentUserRef.current?.id) {
+      return toPortalCloudUid(currentUserRef.current.id);
+    }
+    return null;
+  };
 
   const runCloudWrite = useCallback(
     (task: () => Promise<void>, label?: string) => {
       const currentAuthUser = auth.currentUser;
-      if (!currentAuthUser || !currentAuthUser.emailVerified) {
+      const hasGoogleAuth = Boolean(currentAuthUser && currentAuthUser.emailVerified);
+      const hasPortalAuth =
+        !currentAuthUser && isAuthenticatedRef.current && Boolean(currentUserRef.current?.id);
+      if (!hasGoogleAuth && !hasPortalAuth) {
         markPendingLocalChange();
         return;
       }
@@ -787,29 +817,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Push current institutional state to Firestore (resilient, chunked, error-reporting)
   const pushAllLocalToFirestore = useCallback(async (): Promise<number> => {
     const user = auth.currentUser;
-    if (!user) {
-      const msg = 'ক্লাউড সিঙ্ক করতে আগে "Sign in with Google" দিয়ে যুক্ত হোন।';
+    const isPortalUser = !user && isAuthenticatedRef.current && Boolean(currentUserRef.current?.id);
+
+    if (!user && !isPortalUser) {
+      const msg = 'ক্লাউড সিঙ্ক করতে আগে লগইন করুন।';
       setCloudSyncError(msg);
       throw new Error(msg);
     }
-    if (!user.emailVerified) {
+    if (user && !user.emailVerified) {
       const msg = 'আপনার Google অ্যাকাউন্টের ইমেইল যাচাইকৃত নয়।';
       setCloudSyncError(msg);
       throw new Error(msg);
     }
 
-    const uid = user.uid;
+    const uid = user
+      ? user.uid
+      : `portal_${currentUserRef.current.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'}`;
     setCloudSyncStatus('syncing');
     setCloudSyncError(null);
 
-    let adminFlag = user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
-    if (!adminFlag) {
-      try {
-        const adminSnap = await getDoc(doc(db, 'admins', uid));
-        adminFlag = adminSnap.exists();
-      } catch {
-        adminFlag = false;
+    const PORTAL_ADMIN_ROLES = [
+      'super_admin',
+      'director',
+      'deputy_director',
+      'assistant_director',
+      'admin_incharge',
+    ];
+
+    let adminFlag = false;
+    if (user) {
+      adminFlag = user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+      if (!adminFlag) {
+        try {
+          const adminSnap = await getDoc(doc(db, 'admins', uid));
+          adminFlag = adminSnap.exists();
+        } catch {
+          adminFlag = false;
+        }
       }
+    } else if (isPortalUser) {
+      adminFlag = PORTAL_ADMIN_ROLES.includes(currentUserRef.current.role);
     }
 
     const snapshot = stateRef.current;
@@ -817,7 +864,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const allErrors: string[] = [];
 
     if (adminFlag) {
-      if (user.email) {
+      if (user?.email) {
         await syncAdminUserToFirestore({
           uid,
           email: user.email,
@@ -978,10 +1025,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const verifyFirestoreCloudData = useCallback(async (): Promise<FirestoreVerificationStats> => {
     const user = auth.currentUser;
-    if (!user || !user.emailVerified) {
-      throw new Error('ক্লাউড ডেটা যাচাই করতে আগে Google দিয়ে Sign in করুন।');
+    if (user?.emailVerified) {
+      return fetchFirestoreVerificationStats(isCloudAdmin, user.uid);
     }
-    return fetchFirestoreVerificationStats(isCloudAdmin, user.uid);
+    if (!user && isAuthenticatedRef.current && currentUserRef.current?.id) {
+      const portalUid = `portal_${currentUserRef.current.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'}`;
+      return fetchFirestoreVerificationStats(true, portalUid);
+    }
+    throw new Error('ক্লাউড ডেটা যাচাই করতে আগে লগইন করুন।');
   }, [isCloudAdmin]);
 
   const applyFirebaseUserSession = useCallback(
@@ -1044,9 +1095,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : undefined;
 
         // Cross-device lookup via zero-PII emailBindings / Firestore
+        let matchedViaBinding = false;
         if (!matched && userEmailLower && user.emailVerified) {
           const binding = await lookupEmployeeBindingByEmail(userEmailLower);
           if (binding?.employeeId) {
+            matchedViaBinding = true;
+            const bindingPlaceholder: Employee = {
+              id: binding.employeeId,
+              name: binding.displayName || binding.employeeId,
+              nameBn: binding.displayName || binding.employeeId,
+              email: user.email || '',
+              phone: '',
+              photoUrl: user.photoURL || '',
+              designation: 'Member',
+              designationBn: 'সদস্য',
+              department: 'প্রশাসন',
+              employmentType: 'পূর্ণকালীন',
+              joiningDate: getDhakaDateTime().dateStr,
+              status: 'Active',
+              attendanceMachineId: '',
+              shiftSchedule: '09:00 - 17:00',
+              leavePolicy: 'সাধারণ নীতিমালা',
+              role: binding.role || 'teacher',
+            };
+
+            // Link /users/{uid} FIRST and self-claim authUid so first-time staff can read their own employee doc immediately
+            try {
+              await linkGoogleUserProfile({
+                uid: user.uid,
+                email: user.email || '',
+                displayName: user.displayName || binding.displayName || binding.employeeId,
+                employee: bindingPlaceholder,
+                isCloudAdmin: adminFlag,
+              });
+              await claimEmployeeAuthUidInFirestore(binding.employeeId, user.uid);
+            } catch {
+              // continue fetching profile
+            }
+
             const existingLocal = stateRef.current.employees.find(
               (e) => e.id === binding.employeeId
             );
@@ -1063,24 +1149,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   email: user.email || remoteEmp.email,
                 };
               } else {
-                matched = {
-                  id: binding.employeeId,
-                  name: binding.displayName || binding.employeeId,
-                  nameBn: binding.displayName || binding.employeeId,
-                  email: user.email || '',
-                  phone: '',
-                  photoUrl: user.photoURL || '',
-                  designation: 'Member',
-                  designationBn: 'সদস্য',
-                  department: 'প্রশাসন',
-                  employmentType: 'পূর্ণকালীন',
-                  joiningDate: getDhakaDateTime().dateStr,
-                  status: 'Active',
-                  attendanceMachineId: '',
-                  shiftSchedule: '09:00 - 17:00',
-                  leavePolicy: 'সাধারণ নীতিমালা',
-                  role: binding.role || 'teacher',
-                };
+                matched = bindingPlaceholder;
               }
             }
           }
@@ -1201,7 +1270,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          if (user.emailVerified) {
+          if (user.emailVerified && !matchedViaBinding) {
             try {
               await linkGoogleUserProfile({
                 uid: user.uid,
@@ -1210,6 +1279,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 employee: matched,
                 isCloudAdmin: adminFlag,
               });
+              await claimEmployeeAuthUidInFirestore(matched.id, user.uid);
             } catch (err) {
               setCloudSyncStatus('error');
               setCloudSyncError(extractReadableSyncError(err, `users/${user.uid}`));
@@ -1218,6 +1288,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return matched;
         }
 
+        // Strict whitelist enforcement: any Google email NOT added in "শিক্ষক ও স্টাফ" must be signed out immediately
+        try {
+          await firebaseGoogleLogout();
+        } catch {
+          // ignore sign-out cleanup error
+        }
+        setFirebaseUser(null);
+        setHasDriveToken(false);
+        setIsCloudAdmin(false);
+        setCloudSyncStatus('disconnected');
+        setCloudSyncError(null);
         return null;
       } finally {
         setFirebaseAuthReady(true);
@@ -1241,11 +1322,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, [applyFirebaseUserSession]);
 
-  // Attach real-time Firestore onSnapshot listeners ONLY when local storage is hydrated AND Firebase Auth is ready & signed in
+  // Attach real-time Firestore onSnapshot listeners when signed in via Google OR Portal ID/Password
   useEffect(() => {
-    if (!hydrated || !firebaseAuthReady || !firebaseUser) return;
+    const canAttachCloudListeners =
+      Boolean(firebaseUser) || (isAuthenticated && Boolean(currentUser.id));
+    if (!hydrated || !firebaseAuthReady || !canAttachCloudListeners) return;
 
-    const uid = firebaseUser.uid;
+    const isPortalMode = !firebaseUser;
+    const uid = firebaseUser
+      ? firebaseUser.uid
+      : `portal_${currentUser.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'}`;
+    const useFullCollectionQueries = isPortalMode || isCloudAdmin;
     const unsubs: Unsubscribe[] = [];
     let cancelled = false;
 
@@ -1261,7 +1348,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     const startSyncAndListeners = async () => {
-      // Flush local edits made before Google Auth connected BEFORE listeners overwrite them!
+      // Flush local edits made before cloud connected BEFORE listeners overwrite them
       if (hasPendingLocalChangesRef.current && !initialSeedAttemptedRef.current) {
         try {
           await pushAllLocalToFirestore();
@@ -1273,8 +1360,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (cancelled) return;
 
-      // For cloud admins, watch /users so newly signed-in colleagues get linked authUid & /admins docs automatically
-      if (isCloudAdmin) {
+      // For Google cloud admins, watch /users so newly signed-in colleagues get linked authUid & /admins docs automatically
+      if (isCloudAdmin && !isPortalMode) {
         unsubs.push(
           onSnapshot(
             collection(db, 'users'),
@@ -1301,7 +1388,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Public calendar events
-      const calQuery = isCloudAdmin
+      const calQuery = useFullCollectionQueries
         ? collection(db, 'calendarEvents')
         : query(collection(db, 'calendarEvents'), where('isPublicCalendar', '==', true));
       unsubs.push(
@@ -1404,20 +1491,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Employees
-      const empQuery = isCloudAdmin
+      const empQuery = useFullCollectionQueries
         ? collection(db, 'employees')
         : query(collection(db, 'employees'), where('authUid', '==', uid));
       unsubs.push(
         onSnapshot(
           empQuery,
           async (snap) => {
-            if (snap.empty && isCloudAdmin && !initialSeedAttemptedRef.current && stateRef.current.employees.length > 0) {
+            if (
+              snap.empty &&
+              isCloudAdmin &&
+              !isPortalMode &&
+              !initialSeedAttemptedRef.current &&
+              stateRef.current.employees.length > 0
+            ) {
               initialSeedAttemptedRef.current = true;
               try {
                 await pushAllLocalToFirestore();
               } catch {
                 // error surfaced cleanly
               }
+              return;
+            }
+            if (snap.empty && isPortalMode && stateRef.current.employees.length > 0) {
               return;
             }
             cloudInitializedRef.current = true;
@@ -1472,7 +1568,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             const refreshedCur = curId ? mapped.find((m) => m.id === curId) : undefined;
             if (refreshedCur) {
               setCurrentUser(refreshedCur);
-            } else if (!isAuthenticatedRef.current && firebaseUser.emailVerified) {
+            } else if (!isAuthenticatedRef.current && firebaseUser?.emailVerified) {
               let explicitLogout = false;
               try {
                 explicitLogout = localStorage.getItem(STORAGE_KEYS.EXPLICIT_LOGOUT) === '1';
@@ -1505,7 +1601,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Attendance Records
-      const attQuery = isCloudAdmin
+      const attQuery = useFullCollectionQueries
         ? collection(db, 'attendanceRecords')
         : query(collection(db, 'attendanceRecords'), where('ownerUid', '==', uid));
       unsubs.push(
@@ -1524,7 +1620,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Corrections
-      const corrQuery = isCloudAdmin
+      const corrQuery = useFullCollectionQueries
         ? collection(db, 'corrections')
         : query(collection(db, 'corrections'), where('ownerUid', '==', uid));
       unsubs.push(
@@ -1542,7 +1638,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Leave Balances
-      const balQuery = isCloudAdmin
+      const balQuery = useFullCollectionQueries
         ? collection(db, 'leaveBalances')
         : query(collection(db, 'leaveBalances'), where('ownerUid', '==', uid));
       unsubs.push(
@@ -1565,7 +1661,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Leave Applications
-      const leaveQuery = isCloudAdmin
+      const leaveQuery = useFullCollectionQueries
         ? collection(db, 'leaveApplications')
         : query(collection(db, 'leaveApplications'), where('ownerUid', '==', uid));
       unsubs.push(
@@ -1583,7 +1679,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Action Tracker Items (with Google Drive submissionFiles)
-      const trackerQuery = isCloudAdmin
+      const trackerQuery = useFullCollectionQueries
         ? collection(db, 'actionTrackerItems')
         : query(collection(db, 'actionTrackerItems'), where('assigneeUids', 'array-contains', uid));
       unsubs.push(
@@ -1610,7 +1706,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Meetings
-      const meetingQuery = isCloudAdmin
+      const meetingQuery = useFullCollectionQueries
         ? collection(db, 'meetings')
         : query(collection(db, 'meetings'), where('participantUids', 'array-contains', uid));
       unsubs.push(
@@ -1633,7 +1729,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Tasks
-      const taskQuery = isCloudAdmin
+      const taskQuery = useFullCollectionQueries
         ? collection(db, 'tasks')
         : query(collection(db, 'tasks'), where('assigneeUid', '==', uid));
       unsubs.push(
@@ -1656,7 +1752,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Notifications
-      const notifQuery = isCloudAdmin
+      const notifQuery = useFullCollectionQueries
         ? collection(db, 'notifications')
         : query(collection(db, 'notifications'), where('recipientUid', '==', uid));
       unsubs.push(
@@ -1756,7 +1852,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
 
       // Admin Audit Logs
-      if (isCloudAdmin) {
+      if (useFullCollectionQueries) {
         unsubs.push(
           onSnapshot(
             collection(db, 'auditLogs'),
@@ -1797,7 +1893,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       });
     };
-  }, [hydrated, firebaseAuthReady, firebaseUser, isCloudAdmin, pushAllLocalToFirestore]);
+  }, [
+    hydrated,
+    firebaseAuthReady,
+    firebaseUser,
+    isCloudAdmin,
+    isAuthenticated,
+    currentUser.id,
+    pushAllLocalToFirestore,
+  ]);
 
   // Save local state fallback to localStorage
   useEffect(() => {
@@ -1873,6 +1977,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [darkMode]);
 
+  const signInWithGoogleAccount = async () => {
+    const res = await googleSignInBasic();
+    if (res) {
+      const matchedEmployee = await applyFirebaseUserSession(res.user, false, true);
+      return {
+        user: res.user,
+        matchedEmployee,
+        unauthorizedEmail: !matchedEmployee ? res.user.email || '' : undefined,
+      };
+    }
+    return null;
+  };
+
   const connectGoogleWorkspace = async () => {
     const res = await googleSignInWithDrive();
     if (res) {
@@ -1884,6 +2001,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return {
         ...res,
         matchedEmployee,
+        unauthorizedEmail: !matchedEmployee ? res.user.email || '' : undefined,
       };
     }
     return null;
@@ -1925,9 +2043,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       targetDate: meta?.targetDate,
     };
     setAuditLogs((prev) => [newLog, ...prev]);
-    const currentAuth = auth.currentUser;
-    if (currentAuth?.emailVerified) {
-      syncAuditLogToFirestore(newLog, currentAuth.uid).catch((err) => {
+    const writerUid = resolveActiveWriterUid();
+    if (writerUid) {
+      syncAuditLogToFirestore(newLog, writerUid).catch((err) => {
         setCloudSyncError(extractReadableSyncError(err, `auditLogs/${newLog.id}`));
       });
     }
@@ -1943,11 +2061,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
       setNotifications((prev) => [newNotif, ...prev]);
       const currentAuth = auth.currentUser;
-      if (currentAuth?.emailVerified) {
+      const writerUid = currentAuth?.emailVerified
+        ? currentAuth.uid
+        : !currentAuth && isAuthenticatedRef.current && currentUserRef.current?.id
+        ? `portal_${currentUserRef.current.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'}`
+        : null;
+      if (writerUid) {
         const recipientUid =
-          empUidMapRef.current[newNotif.recipientEmployeeId] || currentAuth.uid;
+          empUidMapRef.current[newNotif.recipientEmployeeId] || writerUid;
         runCloudWrite(
-          () => syncNotificationToFirestore(newNotif, currentAuth.uid, recipientUid),
+          () => syncNotificationToFirestore(newNotif, writerUid, recipientUid),
           `notifications/${newNotif.id}`
         );
       } else {
@@ -1957,26 +2080,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [runCloudWrite, markPendingLocalChange]
   );
 
-  const login = (identifier: string, passcode?: string): boolean => {
+  const login = async (identifier: string, passcode?: string): Promise<boolean> => {
     const cleanInput = identifier.trim().toLowerCase();
     const cleanDigits = identifier.replace(/[\s\-+]/g, '');
 
-    const emp = employees.find((e) => {
-      const idMatch = e.id.toLowerCase() === cleanInput;
-      const emailMatch = e.email.toLowerCase() === cleanInput;
-      const empPhoneDigits = e.phone.replace(/[\s\-+]/g, '');
-      const phoneMatch =
-        cleanDigits.length >= 6 &&
-        (empPhoneDigits === cleanDigits || empPhoneDigits.endsWith(cleanDigits));
-      return idMatch || emailMatch || phoneMatch;
-    });
-
-    if (emp) {
-      const expectedPassword = emp.password || '123456';
-      if (passcode !== undefined && passcode.trim() !== expectedPassword) {
-        return false;
-      }
-
+    const completeLogin = (emp: Employee) => {
       currentUserRef.current = emp;
       isAuthenticatedRef.current = true;
       setCurrentUser(emp);
@@ -1989,8 +2097,64 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // ignore
       }
       logAudit('LOGIN', 'System', `${emp.nameBn || emp.name} (${emp.id}) লগইন করেছেন`);
-      return true;
+    };
+
+    // 1) Fast local match if already hydrated on this browser
+    const localEmp = employees.find((e) => {
+      const idMatch = e.id.toLowerCase() === cleanInput;
+      const emailMatch = e.email.toLowerCase() === cleanInput;
+      const empPhoneDigits = e.phone.replace(/[\s\-+]/g, '');
+      const phoneMatch =
+        cleanDigits.length >= 6 &&
+        (empPhoneDigits === cleanDigits || empPhoneDigits.endsWith(cleanDigits));
+      return idMatch || emailMatch || phoneMatch;
+    });
+
+    if (localEmp) {
+      const expectedPassword = localEmp.password || '123456';
+      if (passcode === undefined || passcode.trim() === expectedPassword) {
+        completeLogin(localEmp);
+        return true;
+      }
     }
+
+    // 2) Cross-device cloud credential hash lookup (works on any fresh browser without Admin logging in first!)
+    if (passcode !== undefined && passcode.trim().length > 0) {
+      const cred = await lookupPortalCredential(identifier, passcode);
+      if (cred?.employeeId) {
+        const remoteEmp = await fetchEmployeeFromFirestoreById(cred.employeeId);
+        const resolvedEmp: Employee = remoteEmp
+          ? { ...remoteEmp, password: passcode.trim() }
+          : {
+              id: cred.employeeId,
+              name: cred.displayName || cred.employeeId,
+              nameBn: cred.displayName || cred.employeeId,
+              email: cleanInput.includes('@') ? identifier.trim() : '',
+              phone: '',
+              password: passcode.trim(),
+              photoUrl: '',
+              designation: 'Member',
+              designationBn: 'সদস্য',
+              department: 'প্রশাসন',
+              employmentType: 'পূর্ণকালীন',
+              joiningDate: getDhakaDateTime().dateStr,
+              status: 'Active',
+              attendanceMachineId: '',
+              shiftSchedule: '09:00 - 17:00',
+              leavePolicy: 'সাধারণ নীতিমালা',
+              role: cred.role || 'teacher',
+            };
+
+        setEmployees((prev) =>
+          prev.some((e) => e.id === resolvedEmp.id)
+            ? prev.map((e) => (e.id === resolvedEmp.id ? { ...e, ...resolvedEmp } : e))
+            : [...prev, resolvedEmp]
+        );
+        completeLogin(resolvedEmp);
+        return true;
+      }
+    }
+
     return false;
   };
 
@@ -2546,21 +2710,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       `নতুন শিক্ষক/স্টাফ যুক্ত করা হয়েছে: ${newEmp.nameBn || newEmp.name} (${cleanId})`
     );
 
-    const currentAuth = auth.currentUser;
-    if (!currentAuth || !currentAuth.emailVerified) {
+    const writerUid = resolveActiveWriterUid();
+    if (!writerUid) {
       markPendingLocalChange();
       return {
         ok: true,
         syncedToCloud: false,
         error:
-          'তথ্য স্থানীয়ভাবে সংরক্ষিত হয়েছে, তবে Google ক্লাউডে সংযুক্ত না থাকায় এখনো Firestore-এ যায়নি।',
+          'তথ্য স্থানীয়ভাবে সংরক্ষিত হয়েছে, তবে ক্লাউডে সংযুক্ত না থাকায় এখনো Firestore-এ যায়নি।',
       };
     }
 
     setCloudSyncStatus('syncing');
     try {
-      await syncEmployeeToFirestore(newEmp, currentAuth.uid, true);
-      await syncLeaveBalanceToFirestore(newBal, currentAuth.uid);
+      await syncEmployeeToFirestore(newEmp, writerUid, true);
+      await syncLeaveBalanceToFirestore(newBal, writerUid);
       setCloudSyncStatus('synced');
       setCloudSyncError(null);
       setCloudLastSyncedAt(new Date().toISOString());
@@ -2693,14 +2857,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : `প্রোফাইল হালনাগাদ করা হয়েছে (ID: ${id})`
     );
 
-    const currentAuth = auth.currentUser;
-    if (!currentAuth || !currentAuth.emailVerified) {
+    const writerUid = resolveActiveWriterUid();
+    if (!writerUid) {
       markPendingLocalChange();
       return {
         ok: true,
         syncedToCloud: false,
         error:
-          'তথ্য স্থানীয়ভাবে আপডেট হয়েছে, তবে Google ক্লাউডে সংযুক্ত না থাকায় এখনো Firestore-এ যায়নি।',
+          'তথ্য স্থানীয়ভাবে আপডেট হয়েছে, তবে ক্লাউডে সংযুক্ত না থাকায় এখনো Firestore-এ যায়নি।',
       };
     }
 
@@ -2712,11 +2876,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           oldId: id,
           newEmp: mergedEmp,
           leaveBalance: renamedBalance,
-          uid: currentAuth.uid,
+          uid: writerUid,
           linkedAuthUid,
         });
       } else {
-        await syncEmployeeToFirestore(mergedEmp, currentAuth.uid, false, linkedAuthUid);
+        await syncEmployeeToFirestore(mergedEmp, writerUid, false, linkedAuthUid);
       }
       if (isCloudAdmin) {
         await syncLinkedUsersAndAdmins([mergedEmp]);
@@ -2751,15 +2915,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       `শিক্ষক/স্টাফ মুছে ফেলা হয়েছে: ${target.nameBn || target.name} (${id})`
     );
 
-    const currentAuth = auth.currentUser;
-    if (!currentAuth || !currentAuth.emailVerified) {
+    const writerUid = resolveActiveWriterUid();
+    if (!writerUid) {
       markPendingLocalChange();
       return { ok: true, syncedToCloud: false };
     }
 
     setCloudSyncStatus('syncing');
     try {
-      await deleteEmployeeFromFirestore(id, target.email);
+      await deleteEmployeeFromFirestore(id, target.email, target);
       setCloudSyncStatus('synced');
       setCloudSyncError(null);
       setCloudLastSyncedAt(new Date().toISOString());
@@ -4930,6 +5094,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         cloudSyncError,
         hasPendingLocalChanges,
         clearCloudSyncError,
+        signInWithGoogleAccount,
         connectGoogleWorkspace,
         disconnectGoogleWorkspace,
         pushAllLocalToFirestore,

@@ -450,6 +450,10 @@
       "schema": { "$ref": "#/entities/EmailBinding" },
       "description": "SHA-256 email hash to ASDRI employeeId mapping for cross-device Google Sign-In without exposing PII."
     },
+    "/portalCredentials/{credHash}": {
+      "schema": { "$ref": "#/entities/EmailBinding" },
+      "description": "Salted SHA-256 (identifier + password) hash to ASDRI employeeId mapping for cross-device ID/Email/Phone + Password login without storing plaintext passwords."
+    },
     "/attendanceRecords/{recordId}": {
       "schema": { "$ref": "#/entities/DailyAttendanceRecord" },
       "description": "Daily attendance records and punch sessions."

@@ -102,6 +102,12 @@ service cloud.firestore {
         get(/databases/$(database)/documents/employees/$(employeeId)).data.authUid == request.auth.uid;
     }
 
+    function isLinkedUserEmployee(employeeId) {
+      return isVerifiedSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.employeeId == employeeId;
+    }
+
     // =========================================================================
     // Entity Validation Blueprints
     // =========================================================================
@@ -175,6 +181,18 @@ service cloud.firestore {
     }
 
     function isValidEmailBinding(data) {
+      return data.keys().hasAll(['hashId', 'employeeId', 'displayName', 'role', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['hashId', 'employeeId', 'displayName', 'role', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.hashId) &&
+        isValidId(data.employeeId) &&
+        isValidString(data.displayName, 1, 150) &&
+        isRole(data.role) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPortalCredential(data) {
       return data.keys().hasAll(['hashId', 'employeeId', 'displayName', 'role', 'ownerUid', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly(['hashId', 'employeeId', 'displayName', 'role', 'ownerUid', 'createdAt', 'updatedAt']) &&
         isValidId(data.hashId) &&
@@ -714,7 +732,11 @@ service cloud.firestore {
     }
 
     match /employees/{employeeId} {
-      allow get: if isValidId(employeeId) && (isPortalOrAdmin() || (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid));
+      allow get: if isValidId(employeeId) && (
+        isPortalOrAdmin() ||
+        (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid) ||
+        isLinkedUserEmployee(employeeId)
+      );
       allow list: if isPortalOrAdmin() || (isSignedIn() && ('authUid' in resource.data) && resource.data.authUid == request.auth.uid);
       allow create: if isPortalOrAdmin() && isValidId(employeeId) && isValidEmployeeProfile(incoming()) &&
         incoming().id == employeeId &&
@@ -728,12 +750,22 @@ service cloud.firestore {
           (('authUid' in existing()) && existing().authUid == request.auth.uid &&
             incoming().role == existing().role &&
             incoming().status == existing().status &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['photoUrl', 'nameBn', 'updatedAt']))
+            incoming().diff(existing()).affectedKeys().hasOnly(['photoUrl', 'nameBn', 'updatedAt'])) ||
+          (isLinkedUserEmployee(employeeId) &&
+            (!('authUid' in existing()) || existing().authUid == '') &&
+            incoming().authUid == request.auth.uid &&
+            incoming().role == existing().role &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['authUid', 'updatedAt']))
         );
       allow delete: if isPortalOrAdmin() && isValidId(employeeId);
 
       match /private/{docId} {
-        allow get: if isValidId(employeeId) && isValidId(docId) && (isPortalOrAdmin() || (isSignedIn() && isEmployeeOwner(employeeId)));
+        allow get: if isValidId(employeeId) && isValidId(docId) && (
+          isPortalOrAdmin() ||
+          (isSignedIn() && isEmployeeOwner(employeeId)) ||
+          isLinkedUserEmployee(employeeId)
+        );
         allow list: if isPortalOrAdmin() || (isSignedIn() && isEmployeeOwner(employeeId));
         allow create: if isPortalOrVerified() && isValidId(employeeId) && isValidId(docId) &&
           isValidEmployeePrivateInfo(incoming()) &&
@@ -761,6 +793,22 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['employeeId', 'displayName', 'role', 'updatedAt']);
       allow delete: if isPortalOrAdmin() && isValidId(hashId);
+    }
+
+    match /portalCredentials/{credHash} {
+      // Exact salted SHA-256 credential hash lookup only; listing/scraping is strictly forbidden
+      allow get: if isValidId(credHash);
+      allow list: if false;
+      allow create: if isPortalOrAdmin() && isValidId(credHash) && isValidPortalCredential(incoming()) &&
+        incoming().hashId == credHash &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isPortalOrAdmin() && isValidId(credHash) && isValidPortalCredential(incoming()) &&
+        incoming().hashId == existing().hashId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['employeeId', 'displayName', 'role', 'updatedAt']);
+      allow delete: if isPortalOrAdmin() && isValidId(credHash);
     }
 
     match /attendanceRecords/{recordId} {
@@ -1053,7 +1101,7 @@ service cloud.firestore {
     }
 
     match /settings/{settingId} {
-      allow get: if isPortalOrAdmin() && settingId in ['attendancePolicy', 'institutionalLeavePolicy'];
+      allow get: if isPortalOrVerified() && settingId in ['attendancePolicy', 'institutionalLeavePolicy'];
       allow list: if isPortalOrAdmin();
       allow create: if isPortalOrAdmin() && isValidId(settingId) &&
         settingId in ['attendancePolicy', 'institutionalLeavePolicy'] &&

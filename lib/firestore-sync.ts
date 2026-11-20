@@ -232,7 +232,6 @@ export async function lookupEmployeeBindingByEmail(email: string): Promise<{
 } | null> {
   const hashId = await computeEmailHash(email);
   if (!hashId) return null;
-  const path = `emailBindings/${hashId}`;
   try {
     const snap = await getDoc(doc(db, 'emailBindings', hashId));
     if (!snap.exists()) return null;
@@ -245,6 +244,139 @@ export async function lookupEmployeeBindingByEmail(email: string): Promise<{
   } catch {
     // User might not have matching doc yet or offline
     return null;
+  }
+}
+
+const PORTAL_CRED_SALT = 'ASDRI_PORTAL_CRED_V1';
+
+export async function computePortalCredentialHash(
+  identifier: string,
+  password: string
+): Promise<string | null> {
+  const cleanId = identifier.trim().toLowerCase();
+  const cleanPwd = password.trim();
+  if (!cleanId || !cleanPwd) return null;
+  if (typeof window !== 'undefined' && window.crypto?.subtle) {
+    const encoded = new TextEncoder().encode(`${PORTAL_CRED_SALT}:${cleanId}:${cleanPwd}`);
+    const digest = await window.crypto.subtle.digest('SHA-256', encoded);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  return null;
+}
+
+function buildPortalIdentifiers(identifier: string): string[] {
+  const results = new Set<string>();
+  const trimmed = identifier.trim().toLowerCase();
+  if (trimmed) results.add(trimmed);
+  const digits = identifier.replace(/[\s\-+]/g, '');
+  if (digits.length >= 6 && /^[0-9]+$/.test(digits)) {
+    results.add(digits);
+    if (digits.startsWith('880') && digits.length === 13) {
+      results.add(`0${digits.slice(3)}`);
+    } else if (digits.startsWith('0') && digits.length === 11) {
+      results.add(`880${digits.slice(1)}`);
+    }
+  }
+  return Array.from(results);
+}
+
+function collectEmployeePortalIdentifiers(emp: Employee): string[] {
+  const set = new Set<string>();
+  if (emp.id && emp.id.trim()) {
+    set.add(emp.id.trim().toLowerCase());
+  }
+  if (emp.email && emp.email.includes('@')) {
+    set.add(emp.email.trim().toLowerCase());
+  }
+  if (emp.phone && emp.phone.trim()) {
+    for (const variant of buildPortalIdentifiers(emp.phone)) {
+      set.add(variant);
+    }
+  }
+  return Array.from(set);
+}
+
+export async function syncPortalCredentialsForEmployee(
+  emp: Employee,
+  uid: string
+): Promise<void> {
+  const effectivePassword = emp.password && emp.password.trim() ? emp.password.trim() : '123456';
+  const identifiers = collectEmployeePortalIdentifiers(emp);
+  if (identifiers.length === 0) return;
+
+  const displayName = clampString(emp.nameBn || emp.name, 150) || emp.id;
+  const safeOwnerUid = sanitizeId(uid || `portal_${emp.id}`);
+
+  for (const ident of identifiers) {
+    const hashId = await computePortalCredentialHash(ident, effectivePassword);
+    if (!hashId) continue;
+    try {
+      const ref = doc(db, 'portalCredentials', hashId);
+      const snap = await getDoc(ref);
+      const payload = {
+        hashId,
+        employeeId: sanitizeId(emp.id),
+        displayName,
+        role: emp.role || 'teacher',
+        ownerUid: snap.exists() ? snap.data().ownerUid || safeOwnerUid : safeOwnerUid,
+        createdAt: snap.exists() ? snap.data().createdAt || serverTimestamp() : serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(ref, payload);
+    } catch {
+      // Do not fail whole employee save if individual credential binding fails
+    }
+  }
+}
+
+export async function lookupPortalCredential(
+  identifier: string,
+  password: string
+): Promise<{
+  employeeId: string;
+  displayName: string;
+  role: Role;
+} | null> {
+  const cleanPwd = password.trim();
+  if (!identifier.trim() || !cleanPwd) return null;
+  const candidates = buildPortalIdentifiers(identifier);
+  for (const cand of candidates) {
+    const hashId = await computePortalCredentialHash(cand, cleanPwd);
+    if (!hashId) continue;
+    try {
+      const snap = await getDoc(doc(db, 'portalCredentials', hashId));
+      if (snap.exists()) {
+        const data = snap.data();
+        if (typeof data.employeeId === 'string' && data.employeeId.trim()) {
+          return {
+            employeeId: data.employeeId.trim(),
+            displayName: String(data.displayName || data.employeeId),
+            role: (data.role as Role) || 'teacher',
+          };
+        }
+      }
+    } catch {
+      // Continue trying remaining identifier variants
+    }
+  }
+  return null;
+}
+
+export async function claimEmployeeAuthUidInFirestore(
+  employeeId: string,
+  uid: string
+): Promise<void> {
+  const empId = sanitizeId(employeeId);
+  if (!empId || !uid) return;
+  try {
+    await updateDoc(doc(db, 'employees', empId), {
+      authUid: uid,
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Already claimed or admin will sync it cleanly
   }
 }
 
@@ -335,6 +467,9 @@ export async function syncEmployeeToFirestore(
     if (emp.email && emp.email.includes('@')) {
       await syncEmailBindingToFirestore(emp, uid);
     }
+
+    // Sync salted SHA-256 portal credential hashes so ID/Email/Phone + Password works across fresh devices
+    await syncPortalCredentialsForEmployee(emp, uid);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `${publicPath} / ${privatePath} (${uid})`);
   }
@@ -342,7 +477,8 @@ export async function syncEmployeeToFirestore(
 
 export async function deleteEmployeeFromFirestore(
   employeeId: string,
-  email?: string
+  email?: string,
+  targetEmp?: Employee
 ): Promise<void> {
   const empId = sanitizeId(employeeId);
   const path = `employees/${empId}`;
@@ -359,6 +495,21 @@ export async function deleteEmployeeFromFirestore(
           await deleteDoc(doc(db, 'emailBindings', hashId));
         } catch {
           // ignore if emailBinding does not exist
+        }
+      }
+    }
+    if (targetEmp) {
+      const effectivePassword =
+        targetEmp.password && targetEmp.password.trim() ? targetEmp.password.trim() : '123456';
+      const idents = collectEmployeePortalIdentifiers(targetEmp);
+      for (const ident of idents) {
+        const credHash = await computePortalCredentialHash(ident, effectivePassword);
+        if (credHash) {
+          try {
+            await deleteDoc(doc(db, 'portalCredentials', credHash));
+          } catch {
+            // ignore if portalCredential does not exist
+          }
         }
       }
     }

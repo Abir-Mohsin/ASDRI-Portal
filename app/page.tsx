@@ -19,43 +19,32 @@ import { DynamicPwaIconSync } from '@/components/pwa/DynamicPwaIconSync';
 
 function CloudSyncStatusBanner() {
   const {
+    isAuthenticated,
     firebaseAuthReady,
     firebaseUser,
     cloudSyncStatus,
     cloudSyncError,
     hasPendingLocalChanges,
     clearCloudSyncError,
-    connectGoogleWorkspace,
     pushAllLocalToFirestore,
   } = useApp();
 
   const [busy, setBusy] = useState(false);
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
-  const [dismissedDisconnect, setDismissedDisconnect] = useState(false);
+  const [dismissedBanner, setDismissedBanner] = useState(false);
 
-  if (!firebaseAuthReady) return null;
+  if (!firebaseAuthReady || !isAuthenticated) return null;
 
   const hasError = cloudSyncStatus === 'error' || Boolean(cloudSyncError);
+  const isCloudActive = Boolean(firebaseUser) || isAuthenticated;
 
-  if (!hasError && firebaseUser && !hasPendingLocalChanges) {
+  if (!hasError && isCloudActive && !hasPendingLocalChanges) {
     return null;
   }
 
-  if (!firebaseUser && dismissedDisconnect && !hasPendingLocalChanges && !hasError) {
+  if (!hasError && dismissedBanner && !hasPendingLocalChanges) {
     return null;
   }
-
-  const handleQuickConnect = async () => {
-    setBusy(true);
-    setBannerMsg(null);
-    try {
-      await connectGoogleWorkspace();
-    } catch (err) {
-      setBannerMsg(err instanceof Error ? err.message : 'Google সংযোগ সম্পন্ন হয়নি।');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const handleQuickSync = async () => {
     setBusy(true);
@@ -88,34 +77,20 @@ function CloudSyncStatusBanner() {
           <span className="truncate sm:whitespace-normal font-medium">
             {hasError
               ? cloudSyncError || bannerMsg || 'ক্লাউড সিঙ্ক ব্যর্থ হয়েছে। অনুগ্রহ করে পুনরায় চেষ্টা করুন।'
-              : !firebaseUser
-              ? 'ক্লাউড সিঙ্ক বন্ধ আছে — আপনার কাজ বর্তমানে কেবল এই ব্রাউজারে সেভ হচ্ছে। সব ডিভাইসে সিঙ্ক করতে Google দিয়ে যুক্ত হোন।'
               : 'আপনার কিছু স্থানীয় পরিবর্তন ক্লাউডে সিঙ্ক করার অপেক্ষায় আছে।'}
           </span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {!firebaseUser ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleQuickConnect}
-              className="px-3 py-1 rounded-md bg-emerald-900 hover:bg-emerald-800 text-white font-semibold cursor-pointer disabled:opacity-60 inline-flex items-center gap-1.5"
-            >
-              <Cloud className="w-3.5 h-3.5" />
-              <span>{busy ? 'সংযোগ হচ্ছে...' : 'Google দিয়ে সিঙ্ক চালু করুন'}</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleQuickSync}
-              className="px-3 py-1 rounded-md bg-emerald-900 hover:bg-emerald-800 text-white font-semibold cursor-pointer disabled:opacity-60 inline-flex items-center gap-1.5"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
-              <span>{busy ? 'সিঙ্ক হচ্ছে...' : 'এখনই ক্লাউডে সিঙ্ক করুন'}</span>
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={handleQuickSync}
+            className="px-3 py-1 rounded-md bg-emerald-900 hover:bg-emerald-800 text-white font-semibold cursor-pointer disabled:opacity-60 inline-flex items-center gap-1.5"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+            <span>{busy ? 'সিঙ্ক হচ্ছে...' : 'এখনই ক্লাউডে সিঙ্ক করুন'}</span>
+          </button>
 
           {hasError ? (
             <button
@@ -129,10 +104,10 @@ function CloudSyncStatusBanner() {
             >
               <X className="w-3.5 h-3.5" />
             </button>
-          ) : !firebaseUser && !hasPendingLocalChanges ? (
+          ) : !hasPendingLocalChanges ? (
             <button
               type="button"
-              onClick={() => setDismissedDisconnect(true)}
+              onClick={() => setDismissedBanner(true)}
               aria-label="বন্ধ করুন"
               className="p-1 rounded text-amber-700 hover:bg-amber-100 cursor-pointer"
             >

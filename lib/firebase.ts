@@ -37,6 +37,11 @@ export const auth = getAuth(app);
 
 export const WORKSPACE_SCOPES = ['https://www.googleapis.com/auth/drive.file'] as const;
 
+// Basic Google Sign-In provider (identity only — NO Drive scope, avoids unverified-scope blocks at login)
+const basicGoogleProvider = new GoogleAuthProvider();
+basicGoogleProvider.setCustomParameters({ prompt: 'select_account' });
+
+// Drive-enabled Google provider (used ONLY when connecting Google Drive for file uploads/backups)
 const googleProvider = new GoogleAuthProvider();
 WORKSPACE_SCOPES.forEach((scope) => googleProvider.addScope(scope));
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -125,6 +130,20 @@ export function initFirebaseAuth(
       onUserChange(user, Boolean(cachedDriveAccessToken));
     }
   });
+}
+
+export async function googleSignInBasic(): Promise<{
+  user: User;
+}> {
+  try {
+    isSigningIn = true;
+    const result = await signInWithPopup(auth, basicGoogleProvider);
+    return {
+      user: result.user,
+    };
+  } finally {
+    isSigningIn = false;
+  }
 }
 
 export async function googleSignInWithDrive(): Promise<{
