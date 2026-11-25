@@ -84,7 +84,11 @@ export function GoogleDriveStatusButton({ isAdmin, compact = false }: GoogleDriv
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
-  const firestoreConsoleUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId}/data`;
+  const dbSegment =
+    !firebaseConfig.firestoreDatabaseId || firebaseConfig.firestoreDatabaseId === '(default)'
+      ? '-default-'
+      : firebaseConfig.firestoreDatabaseId;
+  const firestoreConsoleUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${dbSegment}/data`;
 
   // Explicit User Confirmation Modal States (No silent Drive mutations!)
   const [confirmDeleteFile, setConfirmDeleteFile] = useState<DriveFileItem | null>(null);

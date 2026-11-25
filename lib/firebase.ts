@@ -1,4 +1,5 @@
 import { getApps, getApp, initializeApp } from 'firebase/app';
+import { getAnalytics, isSupported as isAnalyticsSupported } from 'firebase/analytics';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -19,6 +20,8 @@ import firebaseConfig from '../firebase-applet-config.json';
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 function createFirestoreInstance() {
+  const rawDbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId?.trim();
+  const isCustomDb = Boolean(rawDbId && rawDbId !== '(default)');
   try {
     // Disabling fetch streams prevents Chromium/Next.js 15 unhandled
     // "AbortError: signal is aborted without reason" from WebChannel stream teardown.
@@ -26,14 +29,28 @@ function createFirestoreInstance() {
       experimentalForceLongPolling: true,
       useFetchStreams: false,
     } as FirestoreSettings;
-    return initializeFirestore(app, settings, firebaseConfig.firestoreDatabaseId);
+    return isCustomDb && rawDbId
+      ? initializeFirestore(app, settings, rawDbId)
+      : initializeFirestore(app, settings);
   } catch {
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    return isCustomDb && rawDbId ? getFirestore(app, rawDbId) : getFirestore(app);
   }
 }
 
 export const db = createFirestoreInstance();
 export const auth = getAuth(app);
+
+if (typeof window !== 'undefined' && firebaseConfig.measurementId) {
+  isAnalyticsSupported()
+    .then((supported) => {
+      if (supported) {
+        getAnalytics(app);
+      }
+    })
+    .catch(() => {
+      // Analytics optional in restricted environments
+    });
+}
 
 export const WORKSPACE_SCOPES = ['https://www.googleapis.com/auth/drive.file'] as const;
 
