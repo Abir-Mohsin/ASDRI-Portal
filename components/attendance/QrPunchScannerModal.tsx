@@ -14,6 +14,7 @@ interface QrPunchScannerModalProps {
   cameraError: string | null;
   onClose: () => void;
   onComplete: (result: VerifiedPunchResult) => void;
+  onRetryCamera?: () => void;
 }
 
 export function useQrCameraPunch(onPunchResult?: (result: VerifiedPunchResult) => void) {
@@ -44,8 +45,15 @@ export function useQrCameraPunch(onPunchResult?: (result: VerifiedPunchResult) =
       setCameraError(null);
       setIsOpen(true);
 
+      if (typeof window !== 'undefined' && window.isSecureContext === false) {
+        setCameraError(
+          'নিরাপদ HTTPS সংযোগ ছাড়া ব্রাউজার ক্যামেরা চালু করতে দেয় না। অনুগ্রহ করে HTTPS লিংক ব্যবহার করুন অথবা নিচে ৬-সংখ্যার কোড দিন।'
+        );
+        return;
+      }
+
       if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-        setCameraError('ক্যামেরা সমর্থিত নয়। নিচে ৬-সংখ্যার কোড দিন।');
+        setCameraError('এই ব্রাউজারে ক্যামেরা সমর্থিত নয়। নিচে ৬-সংখ্যার কোড দিন।');
         return;
       }
 
@@ -70,11 +78,13 @@ export function useQrCameraPunch(onPunchResult?: (result: VerifiedPunchResult) =
       } catch (err: unknown) {
         const errorObj = err as { name?: string } | undefined;
         if (errorObj?.name === 'NotAllowedError' || errorObj?.name === 'PermissionDeniedError') {
-          setCameraError('ক্যামেরা পারমিশন বন্ধ। অনুগ্রহ করে Allow করুন অথবা ৬-সংখ্যার কোড দিন।');
+          setCameraError(
+            'ক্যামেরা পারমিশন বন্ধ আছে। ব্রাউজারের অ্যাড্রেস বারের আইকন থেকে Camera "Allow" করে নিচের "পুনরায় চেষ্টা করুন" বাটনে ক্লিক করুন (অথবা ৬-সংখ্যার কোড দিন)।'
+          );
         } else if (errorObj?.name === 'NotFoundError' || errorObj?.name === 'DevicesNotFoundError') {
           setCameraError('ডিভাইসে ক্যামেরা পাওয়া যায়নি। নিচে ৬-সংখ্যার কোড দিন।');
         } else {
-          setCameraError('ক্যামেরা চালু করা যায়নি। নিচে ৬-সংখ্যার কোড দিয়ে সম্পন্ন করুন।');
+          setCameraError('ক্যামেরা চালু করা যায়নি। পুনরায় চেষ্টা করুন অথবা নিচে ৬-সংখ্যার কোড দিন।');
         }
       }
     },
@@ -105,6 +115,9 @@ export function useQrCameraPunch(onPunchResult?: (result: VerifiedPunchResult) =
       cameraError,
       onClose: closeScanner,
       onComplete: handleComplete,
+      onRetryCamera: () => {
+        void openCameraPunch(punchType);
+      },
     },
     openCameraPunch,
     closeScanner,
@@ -118,6 +131,7 @@ export function QrPunchScannerModal({
   cameraError,
   onClose,
   onComplete,
+  onRetryCamera,
 }: QrPunchScannerModalProps) {
   const { currentUser, policy, executeVerifiedPunch } = useApp();
   const isAdmin = isAdministrativeRole(currentUser.role);
@@ -347,9 +361,21 @@ export function QrPunchScannerModal({
               )}
             </div>
           ) : cameraError ? (
-            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-              <span>{cameraError}</span>
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{cameraError}</span>
+              </div>
+              {onRetryCamera && (
+                <button
+                  type="button"
+                  onClick={onRetryCamera}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-900 hover:bg-amber-800 text-white font-semibold cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>পুনরায় ক্যামেরা চালু করুন</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="h-44 rounded-xl bg-slate-900 text-slate-200 flex flex-col items-center justify-center gap-2 text-xs">

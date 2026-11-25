@@ -18,6 +18,15 @@
     ],
     "headers": [
       {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Permissions-Policy",
+            "value": "camera=(self), geolocation=(self)"
+          }
+        ]
+      },
+      {
         "source": "/sw.js",
         "headers": [
           {
