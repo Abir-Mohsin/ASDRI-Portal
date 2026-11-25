@@ -255,12 +255,12 @@ export function verifyAttendancePunchClient(
     };
   }
 
-  // 3. Dynamic Rotating QR Verification
+  // 3. Dynamic Rotating QR Verification (Camera-scanned full QR payload only)
   if (!qrInput || typeof qrInput !== 'string') {
     return {
       ok: false,
       code: 'MISSING_QR',
-      error: 'অফিসের ডায়নামিক QR Code স্ক্যান বা কোড প্রদান করা আবশ্যক।',
+      error: 'অফিসের ডায়নামিক QR Code ক্যামেরা দিয়ে স্ক্যান করা আবশ্যক।',
     };
   }
 
@@ -276,7 +276,7 @@ export function verifyAttendancePunchClient(
   for (const slot of validSlots) {
     const expectedShort = computeSlotShortCode(slot);
     const expectedFull = `ASDRI:${slot}:${expectedShort}`;
-    if (cleanInput === expectedFull || cleanInput === expectedShort) {
+    if (cleanInput === expectedFull) {
       matchedSlot = slot;
       matchedCode = expectedShort;
       break;
@@ -288,7 +288,7 @@ export function verifyAttendancePunchClient(
       ok: false,
       code: 'INVALID_OR_EXPIRED_QR',
       error:
-        'QR Code টি মেয়াদোত্তীর্ণ বা ভুল। অফিসের স্ক্রিনে প্রদর্শিত বর্তমান QR Code পুনরায় স্ক্যান করুন।',
+        'QR Code টি মেয়াদোত্তীর্ণ বা সঠিক নয়। অফিসের স্ক্রিনে প্রদর্শিত বর্তমান QR Code ক্যামেরা দিয়ে পুনরায় স্ক্যান করুন।',
     };
   }
 

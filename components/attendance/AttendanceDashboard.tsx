@@ -789,13 +789,11 @@ export function AttendanceDashboard() {
               )}
             </div>
 
-            <div className="mt-4">
-              <div className="text-xl sm:text-2xl font-mono font-extrabold tracking-widest text-[#0f4c3a] bg-white px-4 py-2 rounded-lg border border-slate-200 inline-block tabular-nums">
-                {serverQr?.shortCode || '------'}
-              </div>
-            </div>
+            <p className="mt-3 text-[11px] font-semibold text-slate-600">
+              শুধুমাত্র ক্যামেরা দিয়ে এই QR কোডটি স্ক্যান করে Punch In / Out করুন
+            </p>
 
-            <div className="mt-4 w-52 sm:w-64 max-w-full mx-auto">
+            <div className="mt-3 w-52 sm:w-64 max-w-full mx-auto">
               <div className="flex justify-between text-xs font-semibold text-slate-600 mb-1 tabular-nums">
                 <span>মেয়াদ বাকি:</span>
                 <span className="text-amber-600 font-bold">{serverQr?.remainingSeconds ?? 0} সেকেন্ড</span>
