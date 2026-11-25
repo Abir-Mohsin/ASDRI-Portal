@@ -33,6 +33,7 @@ export function EmployeeManager() {
     updateEmployee,
     deleteEmployee,
     currentUser,
+    isAuthenticated,
     firebaseUser,
     hasPendingLocalChanges,
     cloudSyncError,
@@ -40,6 +41,7 @@ export function EmployeeManager() {
     pushAllLocalToFirestore,
   } = useApp();
 
+  const isCloudSessionActive = Boolean(firebaseUser) || (isAuthenticated && Boolean(currentUser.id));
   const isSuperAdmin = isSuperAdminRole(currentUser.role);
   const isAdmin = isAdministrativeRole(currentUser.role);
 
@@ -151,7 +153,7 @@ export function EmployeeManager() {
       department: emp.department,
       email: emp.email,
       phone: emp.phone,
-      password: emp.password || '123456',
+      password: emp.password || '',
       shiftSchedule: emp.shiftSchedule,
       bloodGroup: emp.bloodGroup || '',
       role: emp.role,
@@ -212,7 +214,7 @@ export function EmployeeManager() {
   // Open Password Modal
   const handleOpenPasswordModal = (emp: Employee) => {
     setPasswordModalEmp(emp);
-    setNewPasswordInput(emp.password || '123456');
+    setNewPasswordInput(emp.password || '');
     setPasswordSavedMsg('');
   };
 
@@ -324,14 +326,14 @@ export function EmployeeManager() {
     if (res.syncedToCloud) {
       setActionNotice({
         type: 'success',
-        text: `${bnName} (আইডি: ${cleanId}) সফলভাবে যুক্ত ও Firestore ক্লাউডে সংরক্ষিত হয়েছে।`,
+        text: `${bnName} (আইডি: ${cleanId}) সফলভাবে যুক্ত ও Firestore ক্লাউডে সংরক্ষিত হয়েছে। এখন এই আইডি/ইমেইল/মোবাইল ও পাসওয়ার্ড দিয়ে যেকোনো ব্রাউজার থেকে লগইন করা যাবে।`,
       });
     } else {
       setActionNotice({
         type: 'warning',
         text:
           res.error ||
-          `${bnName} (আইডি: ${cleanId}) স্থানীয়ভাবে যুক্ত হয়েছে। Firestore-এ পাঠাতে Google ক্লাউড সংযুক্ত করুন।`,
+          `${bnName} (আইডি: ${cleanId}) স্থানীয়ভাবে যুক্ত হয়েছে, তবে Firestore ক্লাউডে সিঙ্ক হয়নি।`,
       });
     }
   };
@@ -364,12 +366,12 @@ export function EmployeeManager() {
       </div>
 
       {/* Firestore Cloud Connection & Action Notice */}
-      {!firebaseUser ? (
+      {!isCloudSessionActive ? (
         <div className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-start gap-2.5 text-amber-950">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
-              <strong>Firestore ক্লাউড এখনো সংযুক্ত নয়:</strong> আপনি বর্তমানে আইডি/পাসওয়ার্ড দিয়ে ব্রাউজারে আছেন। শিক্ষক বা স্টাফের তথ্য সরাসরি Firestore ডাটাবেসে সেভ করতে Google দিয়ে ক্লাউড সিঙ্ক চালু করুন।
+              <strong>Firestore ক্লাউড এখনো সংযুক্ত নয়:</strong> শিক্ষক বা স্টাফের তথ্য সরাসরি Firestore ডাটাবেসে সেভ করতে Google দিয়ে ক্লাউড সিঙ্ক চালু করুন।
             </div>
           </div>
           <button
@@ -407,7 +409,10 @@ export function EmployeeManager() {
             <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
             <span>
               <strong>Firestore ক্লাউড সক্রিয়:</strong>{' '}
-              <span className="font-mono text-emerald-900">{firebaseUser.email}</span> — যেকোনো যোগ বা পরিবর্তন সরাসরি Firestore-এ সংরক্ষিত হবে।
+              <span className="font-mono text-emerald-900">
+                {firebaseUser?.email || `আইডি: ${currentUser.id} (পোর্টাল সিঙ্ক)`}
+              </span>{' '}
+              — যেকোনো যোগ বা পরিবর্তন সরাসরি Firestore-এ সংরক্ষিত হবে।
             </span>
           </div>
           <button
@@ -546,7 +551,7 @@ export function EmployeeManager() {
                   <div className="shrink-0">
                     <span className="text-slate-500 mr-1">পাসওয়ার্ড:</span>
                     <span className="px-1.5 py-0.5 rounded bg-white font-mono text-slate-800 font-semibold border border-slate-200">
-                      {emp.password || '123456'}
+                      {emp.password || 'সেট করা (••••)'}
                     </span>
                   </div>
                 </div>
@@ -646,7 +651,7 @@ export function EmployeeManager() {
 
                     <td className="py-3.5 px-4">
                       <span className="px-2 py-1 rounded bg-slate-100 font-mono text-slate-800 font-semibold border border-slate-200">
-                        {emp.password || '123456'}
+                        {emp.password || 'সেট করা (••••)'}
                       </span>
                     </td>
 
@@ -928,9 +933,13 @@ export function EmployeeManager() {
                   <label className="block font-bold text-slate-700 mb-1">লগইন পাসওয়ার্ড</label>
                   <input
                     type="text"
-                    required
                     value={editFormData.password || ''}
                     onChange={(e) => setEditFormData({ ...editFormData, password: e.target.value })}
+                    placeholder={
+                      editingEmployee.password
+                        ? 'পাসওয়ার্ড পরিবর্তন করতে লিখুন'
+                        : 'অপরিবর্তিত রাখতে ফাঁকা রাখুন'
+                    }
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-900 font-mono"
                   />
                 </div>

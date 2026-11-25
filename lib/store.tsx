@@ -30,6 +30,8 @@ import {
   syncAdminUserToFirestore,
   syncLinkedUsersAndAdmins,
   lookupEmployeeBindingByEmail,
+  syncPortalCredentialsForEmployee,
+  deletePortalCredentialsForEmployee,
   lookupPortalCredential,
   claimEmployeeAuthUidInFirestore,
   getEmployeePrivateContactInfo,
@@ -85,6 +87,7 @@ import {
   SpecialDayConfig,
   ChatConversation,
   ChatMessage,
+  isAdministrativeRole,
 } from './types';
 import {
   INITIAL_POLICY,
@@ -395,6 +398,7 @@ const STORAGE_KEYS = {
   AUTH_USER_ID: 'asdri_v3_auth_user_id',
   EXPLICIT_LOGOUT: 'asdri_v3_explicit_logout',
   V3_CLEAN_MIGRATED: 'asdri_v3_manual_staff_migrated',
+  SYNCED_CRED_DIGESTS: 'asdri_v3_synced_cred_digests_asdri_portal',
 };
 
 const EMPTY_GUEST_USER: Employee = {
@@ -506,6 +510,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const cloudInitializedRef = useRef<boolean>(false);
   const hasPendingLocalChangesRef = useRef<boolean>(false);
   const empUidMapRef = useRef<Record<string, string>>({});
+  const syncedCredDigestRef = useRef<Map<string, string>>(new Map());
   const isAuthenticatedRef = useRef<boolean>(isAuthenticated);
   const currentUserRef = useRef<Employee>(currentUser);
   const stateRef = useRef({
@@ -805,6 +810,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           hasPendingLocalChangesRef.current = true;
           setHasPendingLocalChanges(true);
         }
+
+        const savedCredDigests = localStorage.getItem(STORAGE_KEYS.SYNCED_CRED_DIGESTS);
+        if (savedCredDigests) {
+          try {
+            const parsed = JSON.parse(savedCredDigests) as Record<string, string>;
+            if (parsed && typeof parsed === 'object') {
+              syncedCredDigestRef.current = new Map(Object.entries(parsed));
+            }
+          } catch {
+            // ignore
+          }
+        }
       } catch {
         // ignore storage errors
       } finally {
@@ -894,6 +911,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }),
       ];
       await Promise.all(policyTasks);
+
+      syncedCredDigestRef.current.clear();
+      try {
+        localStorage.removeItem(STORAGE_KEYS.SYNCED_CRED_DIGESTS);
+      } catch {
+        // ignore
+      }
 
       const empRes = await runChunkedTasks(snapshot.employees, (emp) =>
         syncEmployeeToFirestore(emp, uid, false, empUidMapRef.current[emp.id])
@@ -1179,6 +1203,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             nameBn: cleanDisplayName,
             email: user.email,
             phone: '',
+            password: '123456',
             photoUrl: user.photoURL || '',
             designation: 'Super Admin',
             designationBn: 'সুপার এডমিন',
@@ -1498,10 +1523,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         onSnapshot(
           empQuery,
           async (snap) => {
+            const isEffectiveAdmin =
+              isCloudAdmin ||
+              (isPortalMode && isAdministrativeRole(currentUserRef.current.role));
             if (
               snap.empty &&
-              isCloudAdmin &&
-              !isPortalMode &&
+              isEffectiveAdmin &&
               !initialSeedAttemptedRef.current &&
               stateRef.current.employees.length > 0
             ) {
@@ -1903,6 +1930,74 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     pushAllLocalToFirestore,
   ]);
 
+  // Automatic Admin portalCredentials backfill so ID/Password works seamlessly on every other browser
+  useEffect(() => {
+    const canAdminSync =
+      hydrated &&
+      firebaseAuthReady &&
+      (isCloudAdmin ||
+        (!firebaseUser && isAuthenticated && isAdministrativeRole(currentUser.role)));
+    if (!canAdminSync || employees.length === 0) return;
+
+    const currentAuthUser = auth.currentUser;
+    const writerUid = currentAuthUser?.emailVerified
+      ? currentAuthUser.uid
+      : !currentAuthUser && isAuthenticated && currentUser.id
+      ? `portal_${currentUser.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'}`
+      : null;
+    if (!writerUid) return;
+
+    const pendingEmployees = employees.filter((emp) => {
+      const pwd = emp.password?.trim();
+      if (!pwd) return false;
+      const digest = `${emp.id}|${emp.email || ''}|${emp.phone || ''}|${emp.role}|${emp.nameBn || ''}|${emp.name || ''}|${pwd}`;
+      return syncedCredDigestRef.current.get(emp.id) !== digest;
+    });
+    if (pendingEmployees.length === 0) return;
+
+    let cancelled = false;
+    const backfill = async () => {
+      for (const emp of pendingEmployees) {
+        if (cancelled) break;
+        const pwd = emp.password!.trim();
+        const digest = `${emp.id}|${emp.email || ''}|${emp.phone || ''}|${emp.role}|${emp.nameBn || ''}|${emp.name || ''}|${pwd}`;
+        try {
+          await syncPortalCredentialsForEmployee(emp, writerUid, false);
+          syncedCredDigestRef.current.set(emp.id, digest);
+          try {
+            localStorage.setItem(
+              STORAGE_KEYS.SYNCED_CRED_DIGESTS,
+              JSON.stringify(Object.fromEntries(syncedCredDigestRef.current.entries()))
+            );
+          } catch {
+            // ignore storage errors
+          }
+        } catch (err) {
+          if (!cancelled && !isBenignAbortError(err)) {
+            const msg = extractReadableSyncError(err, `portalCredentials/${emp.id}`);
+            setCloudSyncStatus('error');
+            setCloudSyncError(msg);
+          }
+          break;
+        }
+      }
+    };
+    void backfill();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hydrated,
+    firebaseAuthReady,
+    isCloudAdmin,
+    firebaseUser,
+    isAuthenticated,
+    currentUser.id,
+    currentUser.role,
+    employees,
+  ]);
+
   // Save local state fallback to localStorage
   useEffect(() => {
     if (!hydrated) return;
@@ -2027,12 +2122,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       targetDate?: string;
     }
   ) => {
+    const actor = currentUserRef.current?.id ? currentUserRef.current : currentUser;
+    const actorId = actor.id?.trim() || 'SYSTEM';
+    const actorName = actor.nameBn || actor.name || actorId;
+    const actorRole = actor.role || 'staff';
+
     const newLog: AuditLog = {
       id: `AUD-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 5)}`,
       timestamp: new Date().toISOString(),
-      actorId: currentUser.id,
-      actorName: currentUser.nameBn || currentUser.name,
-      actorRole: currentUser.role,
+      actorId,
+      actorName,
+      actorRole,
       action,
       module,
       details,
@@ -2084,7 +2184,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const cleanInput = identifier.trim().toLowerCase();
     const cleanDigits = identifier.replace(/[\s\-+]/g, '');
 
-    const completeLogin = (emp: Employee) => {
+    const completeLogin = async (emp: Employee) => {
+      // Ensure a leftover Google session for a different account doesn't hijack portal Firestore writes
+      if (auth.currentUser) {
+        const authEmail = (auth.currentUser.email || '').trim().toLowerCase();
+        const empEmail = (emp.email || '').trim().toLowerCase();
+        if (!empEmail || authEmail !== empEmail) {
+          try {
+            await firebaseGoogleLogout();
+          } catch {
+            // ignore sign-out cleanup error
+          }
+          setFirebaseUser(null);
+          setHasDriveToken(false);
+          setIsCloudAdmin(false);
+        }
+      }
       currentUserRef.current = emp;
       isAuthenticatedRef.current = true;
       setCurrentUser(emp);
@@ -2099,7 +2214,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       logAudit('LOGIN', 'System', `${emp.nameBn || emp.name} (${emp.id}) লগইন করেছেন`);
     };
 
-    // 1) Fast local match if already hydrated on this browser
+    // 1) Fast local match ONLY when this browser already holds a verified explicit password for that user
     const localEmp = employees.find((e) => {
       const idMatch = e.id.toLowerCase() === cleanInput;
       const emailMatch = e.email.toLowerCase() === cleanInput;
@@ -2111,9 +2226,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (localEmp) {
-      const expectedPassword = localEmp.password || '123456';
-      if (passcode === undefined || passcode.trim() === expectedPassword) {
-        completeLogin(localEmp);
+      if (passcode === undefined) {
+        await completeLogin(localEmp);
+        return true;
+      }
+      const expectedPassword = localEmp.password?.trim();
+      if (expectedPassword && passcode.trim() === expectedPassword) {
+        await completeLogin(localEmp);
         return true;
       }
     }
@@ -2121,7 +2240,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // 2) Cross-device cloud credential hash lookup (works on any fresh browser without Admin logging in first!)
     if (passcode !== undefined && passcode.trim().length > 0) {
       const cred = await lookupPortalCredential(identifier, passcode);
-      if (cred?.employeeId) {
+      if (cred.status === 'error') {
+        if (cred.errorCode === 'permission-denied') {
+          throw new Error(
+            'Firestore Security Rules (firestore.rules) এখনো আপনার Firebase প্রজেক্টে ডেপ্লয় করা হয়নি অথবা অনুমতি নেই। অনুগ্রহ করে অ্যাডমিন পিসি থেকে firebase deploy --only firestore:rules চালান।'
+          );
+        }
+        throw new Error(
+          'Firestore সার্ভারের সাথে সংযোগ করতে সমস্যা হয়েছে। ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।'
+        );
+      }
+      if (cred.status === 'found') {
         const remoteEmp = await fetchEmployeeFromFirestoreById(cred.employeeId);
         const resolvedEmp: Employee = remoteEmp
           ? { ...remoteEmp, password: passcode.trim() }
@@ -2150,7 +2279,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? prev.map((e) => (e.id === resolvedEmp.id ? { ...e, ...resolvedEmp } : e))
             : [...prev, resolvedEmp]
         );
-        completeLogin(resolvedEmp);
+        await completeLogin(resolvedEmp);
         return true;
       }
     }
@@ -2769,7 +2898,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const mergedEmp: Employee = { ...baseEmp, ...data, id: nextId };
+    const cleanedIncomingPassword =
+      typeof data.password === 'string' ? data.password.trim() : undefined;
+    const nextPassword =
+      data.password !== undefined
+        ? cleanedIncomingPassword && cleanedIncomingPassword.length > 0
+          ? cleanedIncomingPassword
+          : baseEmp.password
+        : baseEmp.password;
+    const mergedEmp: Employee = {
+      ...baseEmp,
+      ...data,
+      id: nextId,
+      password: nextPassword,
+    };
     const isRenamingId = nextId !== id;
 
     setEmployees((prev) => prev.map((e) => (e.id === id ? mergedEmp : e)));
@@ -2871,6 +3013,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const linkedAuthUid = empUidMapRef.current[nextId] || empUidMapRef.current[id];
     setCloudSyncStatus('syncing');
     try {
+      const credentialsIdentityChanged =
+        isRenamingId ||
+        (mergedEmp.email || '') !== (baseEmp.email || '') ||
+        (mergedEmp.phone || '') !== (baseEmp.phone || '') ||
+        (nextPassword || '') !== (baseEmp.password || '');
+      if (baseEmp.password?.trim() && credentialsIdentityChanged) {
+        await deletePortalCredentialsForEmployee(baseEmp, baseEmp.password);
+      }
+
       if (isRenamingId) {
         await renameEmployeeIdInFirestore({
           oldId: id,
